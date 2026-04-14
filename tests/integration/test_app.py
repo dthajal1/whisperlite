@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import threading
+from unittest.mock import MagicMock
+
+import pytest
+
+from whisperlite.config import (
+    AudioConfig,
+    Config,
+    HotkeyConfig,
+    InjectConfig,
+    LogConfig,
+    ModelConfig,
+    UIConfig,
+    _DEFAULT_ERROR_ICON,
+    _DEFAULT_IDLE_ICON,
+    _DEFAULT_RECORDING_ICON,
+)
+from whisperlite.errors import TranscribeError, WhisperlitePermissionError
+
+
+@pytest.fixture
+def fake_config() -> Config:
+    return Config(
+        model=ModelConfig(name="fake/model", language="en"),
+        hotkey=HotkeyConfig(record="<f5>"),
+        audio=AudioConfig(max_recording_seconds=10, sample_rate=16000, channels=1),
+        inject=InjectConfig(paste_delay_ms=10),
+        ui=UIConfig(
+            idle_icon=_DEFAULT_IDLE_ICON,
+            recording_icon=_DEFAULT_RECORDING_ICON,
+            error_icon=_DEFAULT_ERROR_ICON,
+        ),
+        log=LogConfig(level="INFO", path="/tmp/whisperlite-test.log"),
+    )
+
+
+@pytest.fixture
+def mocks(mocker):
+    recorder_instance = MagicMock()
+    recorder_instance.is_recording = False
+    recorder_instance.stop_and_drain.return_value = b"fakeaudio"
+
+    mocker.patch(
+        "whisperlite.app.AudioRecorder", return_value=recorder_instance
+    )
+
+    hotkey_instance = MagicMock()
+    hotkey_instance.is_running = False
+    mocker.patch("whisperlite.app.HotkeyManager", return_value=hotkey_instance)
+
+    cancel_instance = MagicMock()
+    cancel_instance.is_running = False
+    mocker.patch("whisperlite.app.CancelListener", return_value=cancel_instance)
+
+    transcribe_mock = mocker.patch(
+        "whisperlite.app.transcribe", return_value="hello world"
+    )
+    warmup_mock = mocker.patch("whisperlite.app.warmup")
+    is_cached_mock = mocker.patch(
+        "whisperlite.app.is_model_cached", return_value=True
+    )
+    download_mock = mocker.patch("whisperlite.app.download_model")
+    capture_mock = mocker.patch(
+        "whisperlite.app.capture_focused_app", return_value=1234
+    )
+    inject_mock = mocker.patch("whisperlite.app.inject_text")
+
+    return {
+        "recorder": recorder_instance,
+        "hotkey_manager": hotkey_instance,
+        "cancel_listener": cancel_instance,
+        "transcribe": transcribe_mock,
+        "warmup": warmup_mock,
+        "is_model_cached": is_cached_mock,
+        "download_model": download_mock,
+        "capture_focused_app": capture_mock,
+        "inject_text": inject_mock,
+    }
+
+
+@pytest.fixture
+def app(mocks, fake_config):
+    from whisperlite.app import WhisperliteApp
+
+    instance = WhisperliteApp(fake_config)
+    yield instance
+    if instance._max_duration_timer is not None:
+        instance._max_duration_timer.cancel()
+
+
+def _make_idle(app) -> None:
+    from whisperlite.app import State
+
+    app._set_state(State.IDLE, icon=_DEFAULT_IDLE_ICON)
+
+
+def test_state_machine_idle_to_recording_on_hotkey(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+
+    assert app._state == State.RECORDING
+    assert app._target_pid == 1234
+    mocks["recorder"].start.assert_called_once()
+    mocks["capture_focused_app"].assert_called_once()
+
+
+def test_state_machine_recording_to_idle_via_hotkey_again(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    assert app._state == State.RECORDING
+
+    app._handle_event(HotkeyPressed())
+
+    assert app._state == State.IDLE
+    mocks["recorder"].stop_and_drain.assert_called_once()
+    mocks["transcribe"].assert_called_once()
+    mocks["inject_text"].assert_called_once()
+    args, kwargs = mocks["inject_text"].call_args
+    assert args[0] == "hello world"
+    assert args[1] == 1234
+
+
+def test_state_machine_cancel_mid_recording(app, mocks):
+    from whisperlite.app import CancelPressed, HotkeyPressed, State
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    assert app._state == State.RECORDING
+
+    app._handle_event(CancelPressed())
+
+    assert app._state == State.IDLE
+    mocks["recorder"].cancel.assert_called_once()
+    mocks["transcribe"].assert_not_called()
+    mocks["inject_text"].assert_not_called()
+
+
+def test_state_machine_max_duration_triggers_transcribe(app, mocks):
+    from whisperlite.app import HotkeyPressed, MaxDurationReached, State
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+
+    app._handle_event(MaxDurationReached())
+
+    assert app._state == State.IDLE
+    mocks["transcribe"].assert_called_once()
+    mocks["inject_text"].assert_called_once()
+
+
+def test_worker_loop_catches_whisperlite_error(app, mocker):
+    from whisperlite.app import HotkeyPressed, ShutdownRequested, State
+
+    mocker.patch.object(
+        app, "_handle_event", side_effect=TranscribeError("bad model")
+    )
+    _make_idle(app)
+    app._queue.put(HotkeyPressed())
+    app._queue.put(ShutdownRequested())
+
+    app._worker_loop()
+
+    assert app._state == State.ERROR
+    assert "bad model" in (app._last_error or "")
+
+
+def test_worker_loop_catches_unexpected_exception(app, mocker):
+    from whisperlite.app import HotkeyPressed, ShutdownRequested, State
+
+    mocker.patch.object(
+        app, "_handle_event", side_effect=RuntimeError("boom")
+    )
+    _make_idle(app)
+    app._queue.put(HotkeyPressed())
+    app._queue.put(ShutdownRequested())
+
+    app._worker_loop()
+
+    assert app._state == State.ERROR
+    assert "boom" in (app._last_error or "")
+
+
+def test_worker_recovers_from_error_state_on_next_event(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    app._enter_error_state("previous failure", exc_info=False)
+    assert app._state == State.ERROR
+
+    app._handle_event(HotkeyPressed())
+
+    assert app._state == State.RECORDING
+    assert app._last_error is None
+    mocks["recorder"].start.assert_called_once()
+
+
+def test_shutdown_protocol_runs_in_order(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    call_order: list[str] = []
+    mocks["cancel_listener"].stop.side_effect = lambda: call_order.append(
+        "cancel_listener"
+    )
+    mocks["recorder"].cancel.side_effect = lambda: call_order.append("recorder")
+    mocks["hotkey_manager"].stop.side_effect = lambda: call_order.append(
+        "hotkey_manager"
+    )
+
+    _make_idle(app)
+    app._hotkey_manager = mocks["hotkey_manager"]
+    app._handle_event(HotkeyPressed())
+    mocks["recorder"].is_recording = True
+    assert app._state == State.RECORDING
+
+    worker_stopped = threading.Event()
+
+    def _fake_worker() -> None:
+        worker_stopped.wait(timeout=2.0)
+
+    app._worker_thread = threading.Thread(target=_fake_worker, daemon=True)
+    app._worker_thread.start()
+    worker_stopped.set()
+
+    app.shutdown()
+
+    assert call_order == ["cancel_listener", "recorder", "hotkey_manager"]
+    assert app._shutting_down is True
+    assert app._hotkey_manager is None
+
+
+def test_hotkey_pressed_in_initializing_state_is_ignored(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    assert app._state == State.INITIALIZING
+    app._handle_event(HotkeyPressed())
+
+    assert app._state == State.INITIALIZING
+    mocks["recorder"].start.assert_not_called()
+    mocks["transcribe"].assert_not_called()
+
+
+def test_post_launch_init_with_cached_model_transitions_to_idle(
+    app, mocks, mocker
+):
+    from whisperlite.app import State
+
+    mocker.patch.object(app, "_probe_microphone")
+    mocker.patch.object(app, "_trigger_accessibility_prompt")
+    mocks["is_model_cached"].return_value = True
+
+    app.post_launch_init()
+
+    assert app._state == State.IDLE
+    mocks["warmup"].assert_called_once_with("fake/model", "en")
+
+
+def test_post_launch_init_with_uncached_model_starts_download(
+    app, mocks, mocker
+):
+    from whisperlite.app import State
+
+    mocker.patch.object(app, "_probe_microphone")
+    mocker.patch.object(app, "_trigger_accessibility_prompt")
+    mocks["is_model_cached"].return_value = False
+
+    app.post_launch_init()
+
+    assert app._state == State.DOWNLOADING
+    assert app._download_thread is not None
+    app._download_cancelled.set()
+    app._download_thread.join(timeout=2.0)
+
+
+def test_post_launch_init_mic_probe_failure_disables_app(app, mocks, mocker):
+    from whisperlite.app import State
+
+    mocker.patch.object(
+        app, "_probe_microphone", side_effect=RuntimeError("no mic")
+    )
+
+    app.post_launch_init()
+
+    assert app._state == State.DISABLED
+    assert "Microphone" in (app._last_error or "")
+
+
+def test_post_launch_init_hotkey_permission_failure_disables_app(
+    app, mocks, mocker
+):
+    from whisperlite.app import State
+
+    mocker.patch.object(app, "_probe_microphone")
+    mocker.patch.object(app, "_trigger_accessibility_prompt")
+    mocks["is_model_cached"].return_value = True
+
+    hotkey_mock = mocker.patch("whisperlite.app.HotkeyManager")
+    hotkey_instance = MagicMock()
+    hotkey_instance.start.side_effect = WhisperlitePermissionError("no input mon")
+    hotkey_mock.return_value = hotkey_instance
+
+    app.post_launch_init()
+
+    assert app._state == State.DISABLED
+
+
+def test_model_ready_event_transitions_downloading_to_idle(app, mocks):
+    from whisperlite.app import ModelReady, State
+
+    app._set_state(State.DOWNLOADING, title="D")
+    app._handle_event(ModelReady())
+
+    assert app._state == State.IDLE
+
+
+def test_model_download_failed_event_disables_app(app, mocks):
+    from whisperlite.app import ModelDownloadFailed, State
+
+    app._set_state(State.DOWNLOADING, title="D")
+    app._handle_event(ModelDownloadFailed(error="404"))
+
+    assert app._state == State.DISABLED
+    assert "404" in (app._last_error or "")
+
+
+def test_on_open_config_uses_effective_path_and_ensures_file(app, mocker, tmp_path):
+    target = tmp_path / "whisperlite.toml"
+    get_path_mock = mocker.patch(
+        "whisperlite.app.get_effective_config_path", return_value=target
+    )
+    ensure_mock = mocker.patch("whisperlite.app.ensure_config_exists")
+    run_mock = mocker.patch("whisperlite.app.subprocess.run")
+
+    app._on_open_config(None)
+
+    get_path_mock.assert_called_once_with()
+    ensure_mock.assert_called_once_with(target)
+    # ensure_config_exists must be called before subprocess.run
+    assert ensure_mock.call_count == 1
+    run_mock.assert_called_once()
+    args, _kwargs = run_mock.call_args
+    assert args[0] == ["open", str(target)]

@@ -1,0 +1,39 @@
+# whisperlite config — copy to ~/.config/whisperlite/config.toml and edit.
+
+[model]
+# Hugging Face repo id of the mlx-whisper model to use.
+name = "mlx-community/whisper-medium-mlx"
+# Language code (e.g. "en") or "auto" for detection.
+language = "en"
+
+[hotkey]
+# pynput GlobalHotKeys keyspec. Prefer a modifier combo (ctrl/cmd/alt/shift)
+# plus a letter — bare function keys like <f5> are unreliable on macOS 14+
+# because Apple changed CGEventTap semantics for function keys.
+record = "<ctrl>+<cmd>+r"
+
+[audio]
+# Hard cap so toggle-mode mistakes don't record forever. Range: [5, 600].
+max_recording_seconds = 60
+# One of: 8000, 16000, 22050, 44100, 48000. Whisper expects 16000.
+sample_rate = 16000
+# 1 = mono, 2 = stereo. Whisper uses mono.
+channels = 1
+
+[inject]
+# Milliseconds to wait after Cmd+V before restoring the pasteboard. Range: [0, 2000].
+paste_delay_ms = 150
+
+[ui]
+# Menubar icon paths (PNG, should be 22x22 or 44x44 template images — monochrome with transparent background).
+# Leave commented out to use the bundled speech-bubble icons in whisperlite/assets/.
+# Absolute paths or paths relative to your current working directory both work.
+# idle_icon = "~/my-icons/idle.png"
+# recording_icon = "~/my-icons/recording.png"
+# error_icon = "~/my-icons/error.png"
+
+[log]
+# One of: DEBUG, INFO, WARNING, ERROR, CRITICAL (case-insensitive).
+level = "INFO"
+# Rotating log file; `~` is expanded.
+path = "~/Library/Logs/whisperlite.log"

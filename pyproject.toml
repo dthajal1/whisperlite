@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisperlite"
+version = "0.0.1"
+description = "A minimal, hackable, fully-local macOS voice dictation tool."
+requires-python = ">=3.10"
+license = "MIT"
+readme = "README.md"
+authors = [{ name = "diraj thajali" }]
+keywords = ["dictation", "voice", "whisper", "mlx", "macos", "menubar", "transcription", "speech-to-text"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "mlx-whisper>=0.4.3,<0.5",
+    "numpy>=1.26,<3.0",
+    "sounddevice>=0.4,<0.6",
+    "rumps==0.4.0",
+    "pynput>=1.7,<2.0",
+    "pyobjc-framework-Cocoa>=10,<12",
+    "pyobjc-framework-ApplicationServices>=10,<12",
+    "pyobjc-framework-Quartz>=10,<12",
+    "huggingface-hub>=0.20,<1.0",
+    "psutil>=5.9,<7.0",
+    "tomli>=2.0,<3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-mock>=3.12,<4.0",
+]
+
+[project.scripts]
+whisperlite = "whisperlite.__main__:main"
+
+# TODO: verify these URLs after pushing to GitHub
+[project.urls]
+Homepage = "https://github.com/dirajthajali/whisperlite"
+Repository = "https://github.com/dirajthajali/whisperlite"
+Issues = "https://github.com/dirajthajali/whisperlite/issues"
+
+[tool.setuptools.packages.find]
+include = ["whisperlite*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+whisperlite = ["assets/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
