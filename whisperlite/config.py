@@ -146,13 +146,13 @@ language = "en"
 def ensure_config_exists(path: Path) -> None:
     """Create ``path`` from the bundled example config if it doesn't exist.
 
-    Falls back to a minimal ``[model]`` stub if ``config.example.toml``
+    Falls back to a minimal ``[model]`` stub if ``whisperlite.example.toml``
     cannot be located. No-op if the file already exists.
     """
     if path.exists():
         return
 
-    example = Path(__file__).parent.parent / "config.example.toml"
+    example = Path(__file__).parent.parent / "whisperlite.example.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     if example.exists():
         shutil.copyfile(example, path)
