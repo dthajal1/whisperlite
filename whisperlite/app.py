@@ -117,6 +117,7 @@ class WhisperliteApp(rumps.App):
         self._max_duration_timer: threading.Timer | None = None
         self._download_thread: threading.Thread | None = None
         self._download_cancelled = threading.Event()
+        self._cancel_requested: bool = False
 
         self._recorder = AudioRecorder(
             sample_rate=config.audio.sample_rate,
@@ -360,6 +361,12 @@ class WhisperliteApp(rumps.App):
         self._queue.put(HotkeyPressed())
 
     def _on_cancel_pressed(self) -> None:
+        # Set the flag synchronously so the worker thread's checkpoints in
+        # _finish_recording_and_transcribe (which runs long — transcribe +
+        # inject can take hundreds of ms) can observe it without waiting for
+        # the queue to drain. The queued event still fires the RECORDING-state
+        # sync cancel path when the worker is idle.
+        self._cancel_requested = True
         self._queue.put(CancelPressed())
 
     def _worker_loop(self) -> None:
@@ -414,6 +421,12 @@ class WhisperliteApp(rumps.App):
         if isinstance(event, CancelPressed):
             if self._state == State.RECORDING:
                 self._cancel_recording()
+            elif self._state in (State.TRANSCRIBING, State.INJECTING):
+                logger.info(
+                    "cancel requested during %s, will abort at next checkpoint",
+                    self._state.value,
+                )
+                self._cancel_requested = True
             else:
                 logger.debug("cancel pressed in state %s, ignoring", self._state)
             return
@@ -424,6 +437,7 @@ class WhisperliteApp(rumps.App):
             return
 
     def _start_recording(self) -> None:
+        self._cancel_requested = False
         self._recorder.start()
         try:
             self._cancel_listener = CancelListener(on_cancel=self._on_cancel_pressed)
@@ -444,37 +458,81 @@ class WhisperliteApp(rumps.App):
             play(self._config.sound.start_path)
 
     def _finish_recording_and_transcribe(self) -> None:
+        self._cancel_max_duration_timer()
+        self._recording_started_at = None
+
+        # Checkpoint 1: cancel before we even drain audio.
+        if self._cancel_requested:
+            logger.info("cancel requested before drain; aborting")
+            self._abort_to_idle()
+            return
+
         if self._config.sound.enabled:
             play(self._config.sound.stop_path)
-        self._stop_cancel_listener()
-        self._cancel_max_duration_timer()
         audio = self._recorder.stop_and_drain()
-        self._recording_started_at = None
+
+        # Checkpoint 2: cancel after drain but before transcribe.
+        if self._cancel_requested:
+            logger.info("cancel requested after drain; discarding audio")
+            self._abort_to_idle()
+            return
 
         self._set_state(State.TRANSCRIBING, icon=self._config.ui.recording_icon)
         text = transcribe(
             audio, self._config.model.name, self._config.model.language
         )
 
+        # Checkpoint 3: cancel after transcribe but before inject.
+        if self._cancel_requested:
+            logger.info("cancel requested mid-transcribe; discarding result")
+            self._abort_to_idle()
+            return
+
         if not text:
             logger.info("empty transcription, returning to idle")
+            self._stop_cancel_listener()
             self._set_state(State.IDLE, icon=self._config.ui.idle_icon)
             return
 
         self._set_state(State.INJECTING, icon=self._config.ui.recording_icon)
         inject_text(text, paste_delay_ms=self._config.inject.paste_delay_ms)
+
+        # Checkpoint 4: inject is atomic — if a cancel snuck in during the
+        # paste window, log it but the text already landed.
+        if self._cancel_requested:
+            logger.warning(
+                "cancel requested but paste already completed; user text was injected"
+            )
+            self._cancel_requested = False
+
+        self._stop_cancel_listener()
         self._set_state(State.IDLE, icon=self._config.ui.idle_icon)
 
     def _cancel_recording(self) -> None:
-        if self._config.sound.enabled:
-            play(self._config.sound.stop_path)
-        self._stop_cancel_listener()
+        logger.info("cancel requested during RECORDING")
+        self._abort_to_idle()
+
+    def _abort_to_idle(self) -> None:
+        """Single cleanup path used by every cancel scenario.
+
+        Safe to call from any in-progress state (RECORDING, TRANSCRIBING,
+        INJECTING). Stops timers, cancels the recorder if still running,
+        plays the stop sound as audible confirmation, tears down the cancel
+        listener, and transitions to IDLE.
+        """
+        self._cancel_requested = False
         self._cancel_max_duration_timer()
+        self._recording_started_at = None
         try:
             self._recorder.cancel()
         except Exception as exc:
             logger.warning("recorder cancel raised: %s", exc)
-        self._recording_started_at = None
+        if self._config.sound.enabled:
+            try:
+                play(self._config.sound.stop_path)
+            except Exception as exc:
+                logger.warning("cancel stop-sound play raised: %s", exc)
+        self._stop_cancel_listener()
         self._set_state(State.IDLE, icon=self._config.ui.idle_icon)
 
     def _stop_cancel_listener(self) -> None:

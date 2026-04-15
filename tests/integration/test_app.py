@@ -372,6 +372,175 @@ def test_sound_not_played_when_disabled(app, mocks):
     mocks["play"].assert_not_called()
 
 
+def test_escape_during_recording_cancels_cleanly(mocks, fake_config):
+    from dataclasses import replace
+    from whisperlite.app import CancelPressed, HotkeyPressed, State, WhisperliteApp
+
+    cfg = replace(fake_config, sound=replace(fake_config.sound, enabled=True))
+    instance = WhisperliteApp(cfg)
+    try:
+        instance._set_state(State.IDLE, icon=_DEFAULT_IDLE_ICON)
+        instance._handle_event(HotkeyPressed())
+        assert instance._state == State.RECORDING
+        mocks["play"].reset_mock()
+
+        instance._handle_event(CancelPressed())
+
+        assert instance._state == State.IDLE
+        mocks["recorder"].cancel.assert_called_once()
+        mocks["transcribe"].assert_not_called()
+        mocks["inject_text"].assert_not_called()
+        mocks["play"].assert_any_call(cfg.sound.stop_path)
+        mocks["cancel_listener"].stop.assert_called()
+    finally:
+        if instance._max_duration_timer is not None:
+            instance._max_duration_timer.cancel()
+
+
+def test_escape_during_transcribing_aborts_before_inject(app, mocks):
+    from whisperlite.app import CancelPressed, HotkeyPressed, State
+
+    # Simulate Escape landing during transcribe(): the mock sets the flag.
+    def _transcribe_and_flag(*args, **kwargs):
+        app._cancel_requested = True
+        return "hello world"
+
+    mocks["transcribe"].side_effect = _transcribe_and_flag
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    assert app._state == State.RECORDING
+    app._handle_event(HotkeyPressed())  # triggers finish
+
+    assert app._state == State.IDLE
+    mocks["transcribe"].assert_called_once()
+    mocks["inject_text"].assert_not_called()
+
+
+def test_escape_after_drain_before_transcribe(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    def _drain_and_flag(*args, **kwargs):
+        # Simulate the cancel listener's async callback setting the flag
+        # directly on the app (which is what _on_cancel_pressed does).
+        app._cancel_requested = True
+        return b"fakeaudio"
+
+    mocks["recorder"].stop_and_drain.side_effect = _drain_and_flag
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    assert app._state == State.RECORDING
+    app._handle_event(HotkeyPressed())
+
+    assert app._state == State.IDLE
+    mocks["transcribe"].assert_not_called()
+    mocks["inject_text"].assert_not_called()
+
+
+def test_escape_before_drain_skips_everything(app, mocks):
+    from whisperlite.app import CancelPressed, HotkeyPressed, State
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    assert app._state == State.RECORDING
+    # Simulate: cancel arrives after queue-based hotkey, before finish runs.
+    # We set the flag directly (the queue handling is single-threaded in tests).
+    app._cancel_requested = True
+    app._handle_event(HotkeyPressed())  # triggers finish, which sees the flag
+
+    assert app._state == State.IDLE
+    mocks["recorder"].stop_and_drain.assert_not_called()
+    mocks["transcribe"].assert_not_called()
+    mocks["inject_text"].assert_not_called()
+
+
+def test_escape_during_idle_is_noop(app, mocks):
+    from whisperlite.app import CancelPressed, State
+
+    _make_idle(app)
+    app._handle_event(CancelPressed())
+
+    assert app._state == State.IDLE
+    mocks["recorder"].cancel.assert_not_called()
+    mocks["transcribe"].assert_not_called()
+
+
+def test_escape_during_initializing_is_noop(app, mocks):
+    from whisperlite.app import CancelPressed, State
+
+    assert app._state == State.INITIALIZING
+    app._handle_event(CancelPressed())
+
+    assert app._state == State.INITIALIZING
+
+
+def test_escape_during_downloading_is_noop(app, mocks):
+    from whisperlite.app import CancelPressed, State
+
+    app._set_state(State.DOWNLOADING, title="D")
+    app._handle_event(CancelPressed())
+
+    assert app._state == State.DOWNLOADING
+
+
+def test_double_escape_press_is_idempotent(app, mocks):
+    from whisperlite.app import CancelPressed, HotkeyPressed, State
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    app._handle_event(CancelPressed())
+    assert app._state == State.IDLE
+    # Second escape must be a clean no-op.
+    app._handle_event(CancelPressed())
+    assert app._state == State.IDLE
+    mocks["recorder"].cancel.assert_called_once()  # still just the first one
+
+
+def test_abort_to_idle_invokes_all_cleanup_hooks(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    timer_before = app._max_duration_timer
+    assert timer_before is not None
+
+    app._abort_to_idle()
+
+    assert app._state == State.IDLE
+    assert app._cancel_requested is False
+    assert app._max_duration_timer is None
+    assert app._recording_started_at is None
+    assert app._cancel_listener is None
+    mocks["recorder"].cancel.assert_called_once()
+    mocks["cancel_listener"].stop.assert_called()
+
+
+def test_cancel_listener_alive_through_transcribe(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    observed: dict[str, object] = {}
+
+    def _check_during_transcribe(*args, **kwargs):
+        # During transcribe, the cancel listener must still be attached to
+        # the app (not torn down at the start of finish anymore).
+        observed["listener_attached"] = app._cancel_listener is not None
+        observed["listener_stop_count"] = mocks["cancel_listener"].stop.call_count
+        return "hello world"
+
+    mocks["transcribe"].side_effect = _check_during_transcribe
+
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    app._handle_event(HotkeyPressed())
+
+    assert observed["listener_attached"] is True
+    assert observed["listener_stop_count"] == 0
+    # After inject + return to idle, the listener IS stopped exactly once.
+    assert mocks["cancel_listener"].stop.call_count == 1
+    assert app._cancel_listener is None
+
+
 def test_on_open_config_uses_effective_path_and_ensures_file(app, mocker, tmp_path):
     target = tmp_path / "whisperlite.toml"
     get_path_mock = mocker.patch(
