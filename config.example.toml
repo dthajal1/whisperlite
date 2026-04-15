@@ -7,14 +7,21 @@ name = "mlx-community/whisper-medium-mlx"
 language = "en"
 
 [hotkey]
-# pynput GlobalHotKeys keyspec. Prefer a modifier combo (ctrl/cmd/alt/shift)
-# plus a letter — bare function keys like <f5> are unreliable on macOS 14+
-# because Apple changed CGEventTap semantics for function keys.
-record = "<ctrl>+<cmd>+r"
+# Double-tap a modifier key to start/stop recording — same pattern as
+# JetBrains "Search Everywhere" (double-Shift). Feels like a hidden
+# single-key shortcut once you get used to it and never collides with
+# app-defined chords.
+# Valid values for `record`: <alt>, <shift>, <ctrl>, <cmd>.
+# `double_tap_window_ms` is how quickly the second tap must follow the
+# first. Range: [150, 1000]. 400 is comfortable for most people; drop to
+# ~250 if you get accidental triggers, raise to ~600 if you're missing
+# taps. Using the modifier in a chord (e.g. Opt+C) does NOT count as a tap.
+record = "<alt>"
+double_tap_window_ms = 400
 
 [audio]
 # Hard cap so toggle-mode mistakes don't record forever. Range: [5, 600].
-max_recording_seconds = 60
+max_recording_seconds = 120
 # One of: 8000, 16000, 22050, 44100, 48000. Whisper expects 16000.
 sample_rate = 16000
 # 1 = mono, 2 = stereo. Whisper uses mono.
@@ -37,3 +44,16 @@ paste_delay_ms = 150
 level = "INFO"
 # Rotating log file; `~` is expanded.
 path = "~/Library/Logs/whisperlite.log"
+
+[sound]
+# Short audio cues played when recording starts and stops. Each cue runs
+# through macOS `afplay` in a background subprocess, so it never blocks
+# the coordinator worker. Set `enabled = false` to silence them entirely.
+#
+# `start_path` and `stop_path` can be any .aiff / .wav / .mp3 file that
+# `afplay` understands. Browse /System/Library/Sounds/ for the built-in
+# macOS alerts — good picks include Tink, Pop, Funk, Glass, Hero, Morse,
+# Ping, Purr, Sosumi, Submarine, Bottle, Frog, Blow, Basso.
+enabled = true
+start_path = "/System/Library/Sounds/Tink.aiff"
+stop_path = "/System/Library/Sounds/Pop.aiff"

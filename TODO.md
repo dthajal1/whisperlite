@@ -44,26 +44,6 @@ P1 = do next, P2 = soon, P3 = nice-to-have, P4 = someday/maybe.
 
 ---
 
-## [P3] Drop Sequoia activation timeout from 500ms to 200ms
-
-**What:** Tune `_ACTIVATION_TIMEOUT_SECONDS` in `whisperlite/inject.py` from 0.5 to 0.2 to shave ~300ms off every dictation on macOS Sequoia.
-
-**Why:** On Sequoia, native `NSRunningApplication.activateWithOptions_` is ALWAYS silently blocked by the focus-stealing protection. The current implementation polls for 500ms before giving up and falling back to AppleScript. Since the native path never succeeds on Sequoia, polling that long is pure wasted time — the user pays ~300ms extra per dictation for a retry that was never going to work.
-
-**Context:** See `whisperlite/inject.py:_force_activate()`. It polls frontmost-app PID every 50ms for up to 500ms after calling the native activation, then falls back to `osascript -e 'tell application "X" to activate'`. On the user's Sequoia machine the poll always hits the timeout; the AppleScript fallback is what actually works. End-to-end inject latency is currently ~1113ms; dropping the timeout to 200ms should bring it down to ~810ms.
-
-**Acceptance criteria:**
-- [ ] `_ACTIVATION_TIMEOUT_SECONDS = 0.2` in `inject.py`.
-- [ ] Polling tests in `tests/integration/test_inject.py` updated to match the new timeout (fewer poll iterations expected before fallback).
-- [ ] Manual retest: end-to-end latency from hotkey-release to text-appearing drops measurably on Sequoia.
-- [ ] No regression on older macOS (if anyone's testing — native path still gets a chance).
-
-**Dependencies:** none.
-
-**Approach hints:** Before dropping to 200ms, consider adding a runtime OS version check — if `platform.mac_ver()[0]` >= `"14.0"`, use 200ms; else stay at 500ms. But this is optional — 200ms is probably fine universally.
-
----
-
 ## [P3] Add `--config` CLI flag to `whisperlite` entrypoint
 
 **What:** Accept `--config <path>` on the command line (`python -m whisperlite --config /path/to/custom.toml`) to override the config search order.
@@ -85,20 +65,20 @@ P1 = do next, P2 = soon, P3 = nice-to-have, P4 = someday/maybe.
 
 ## [P4] Hold-to-talk mode
 
-**What:** Support `mode = "hold"` in the config so pressing and holding the hotkey records, and releasing it stops + transcribes. Current v1 is toggle-only.
+**What:** Support `mode = "hold"` in the config so pressing and holding the modifier records, and releasing it stops + transcribes. Today v1 uses a double-tap toggle pattern; hold mode would be a third interaction mode on top of it, not a replacement.
 
-**Why:** Some users prefer press-and-hold for short utterances (no risk of leaving recording on accidentally). Dropped from v1 because `pynput.keyboard.GlobalHotKeys` gives activation callbacks only, not key-down/key-up events, so hold mode requires a different pynput API.
+**Why:** Some users prefer press-and-hold for short utterances (no risk of leaving recording on accidentally). Both modes have their place — double-tap is better for longer dictation (hands-free while you think), hold is better for quick one-shot captures where you don't want to think about toggling off.
 
-**Context:** See design doc section "Global hotkey" and office-hours Q2. Supporting hold mode cleanly requires switching to `pynput.keyboard.Listener` with `on_press`/`on_release` callbacks, or running a second listener alongside `GlobalHotKeys` for the modifier-key-up event detection. The current `whisperlite/hotkey.py` uses `GlobalHotKeys` only. ~30 min refactor.
+**Context:** v1 uses a double-tap-modifier pattern built on `pynput.keyboard.Listener` with an `on_press`/`on_release` state machine (see `whisperlite/hotkey.py`). The state machine already tracks modifier press-time, chord detection, and key-repeat suppression, so adding a hold-mode branch is a localized change: treat a long hold (>300ms, the current tap-disqualification threshold) as a start-record event, and the subsequent release as a stop-record event, instead of discarding both. The wire-up from app.py would need a small enum to select between the two modes.
 
 **Acceptance criteria:**
 - [ ] `hotkey.mode = "hold"` in `whisperlite.toml` makes press-and-hold start/stop recording.
-- [ ] Default stays `toggle` (no breaking change for existing users).
+- [ ] Default stays `double_tap` (no breaking change for existing users).
 - [ ] Both modes covered by tests in `tests/integration/test_hotkey.py`.
 
 **Dependencies:** none.
 
-**Approach hints:** Easiest path: when mode == "hold", use `pynput.keyboard.Listener(on_press, on_release)` instead of `GlobalHotKeys`. The listener callbacks get Key objects directly, so you can match the configured key + modifier combo manually. Harder than it sounds because pynput's Key objects are platform-dependent. Test on Sequoia before calling it done.
+**Approach hints:** Add a `mode` field to `HotkeyConfig` and branch inside `HotkeyManager._on_press`/`_on_release`. The hold-mode branch can reuse the existing `_modifier_is_down` / `_chord_detected_during_press` bookkeeping but emit `on_record_pressed` twice (start on sustained press, stop on release) instead of counting taps. Test on Sequoia before calling it done.
 
 ---
 
@@ -139,5 +119,26 @@ P1 = do next, P2 = soon, P3 = nice-to-have, P4 = someday/maybe.
 **Dependencies:** dogfood week complete, core loop stable, no known bugs. Signing/notarization is a further step that requires the Apple Developer Account.
 
 **Approach hints:** Try `py2app` first — it's the most documented for this exact use case. Start without signing (users will have to right-click -> Open the first time). Add signing + notarization as a separate follow-up once the basic bundle works.
+
+---
+
+## [P4] Bundle custom whisperlite-branded sound cues
+
+**What:** Ship a pair of custom-designed short audio cues (e.g. `whisperlite_start.aiff`, `whisperlite_stop.aiff`) inside the package at `whisperlite/assets/sounds/` instead of defaulting to macOS system sounds like Tink and Pop.
+
+**Why:** Current defaults (`/System/Library/Sounds/Tink.aiff` and `Pop.aiff`) are fine but generic — many macOS apps and the system itself use them for notifications, which could cause confusion ("was that whisperlite or an iMessage?"). A pair of distinctive, on-brand cues would make whisperlite instantly recognizable by ear.
+
+**Context:** The sound cue feature is already wired in via `whisperlite/sounds.py` and config fields `[sound] start_path` and `[sound] stop_path`. Defaults point to `/System/Library/Sounds/Tink.aiff` and `Pop.aiff`. To ship custom sounds, add a `whisperlite/assets/sounds/` directory with two short (<200ms) audio files, update the defaults in `whisperlite/config.py` to point to the bundled files via `Path(__file__).parent / "assets" / "sounds" / "..."`, and add the new assets to the `[tool.setuptools.package-data]` glob in `pyproject.toml`.
+
+**Acceptance criteria:**
+- [ ] Two audio files at `whisperlite/assets/sounds/` (names and format your call)
+- [ ] Default config values point to the bundled files
+- [ ] Files ship with the package (verified by `pip install` into a fresh venv and checking `whisperlite/assets/sounds/` is present)
+- [ ] Sounds are short (<200ms) so they don't delay dictation flow
+- [ ] Both sounds are clearly distinguishable from each other at a glance (different pitch or timbre)
+
+**Dependencies:** none.
+
+**Approach hints:** For the actual sound design, options are (a) commission a sound designer, (b) synthesize with a tool like Audacity or Ableton, or (c) use Creative-Commons-licensed short SFX from freesound.org (check the license, prefer CC0). Bundling via `package-data` is the same pattern already used for the speech-bubble PNG icons — see how `whisperlite/assets/*.png` is configured in `pyproject.toml`.
 
 ---

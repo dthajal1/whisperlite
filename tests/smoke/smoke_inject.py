@@ -6,7 +6,7 @@ import sys
 import time
 
 from whisperlite.errors import InjectError
-from whisperlite.inject import capture_focused_app, inject_text
+from whisperlite.inject import inject_text
 
 TARGET_APP = "Notes"
 PAYLOAD = "hello from whisperlite smoke test"
@@ -28,14 +28,8 @@ def main() -> int:
     subprocess.run(["open", "-a", TARGET_APP], check=True)
     time.sleep(1.5)
 
-    target_pid = capture_focused_app()
-    print(f"   captured focused app pid={target_pid}")
-    if target_pid is None:
-        print("error: could not capture focused app", file=sys.stderr)
-        return 1
-
     try:
-        inject_text(PAYLOAD, target_pid=target_pid)
+        inject_text(PAYLOAD)
     except InjectError as exc:
         print(f"InjectError: {exc}", file=sys.stderr)
         return 1

@@ -21,12 +21,15 @@ CONFIG_ENV_VAR = "WHISPERLITE_CONFIG"
 _VALID_SAMPLE_RATES = {8000, 16000, 22050, 44100, 48000}
 _VALID_CHANNELS = {1, 2}
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-_KNOWN_TABLES = {"model", "hotkey", "audio", "inject", "ui", "log"}
+_KNOWN_TABLES = {"model", "hotkey", "audio", "inject", "ui", "log", "sound"}
 
 _BUNDLED_ASSETS_DIR = Path(__file__).parent / "assets"
 _DEFAULT_IDLE_ICON = _BUNDLED_ASSETS_DIR / "idle.png"
 _DEFAULT_RECORDING_ICON = _BUNDLED_ASSETS_DIR / "recording.png"
 _DEFAULT_ERROR_ICON = _BUNDLED_ASSETS_DIR / "error.png"
+
+_DEFAULT_START_SOUND = Path("/System/Library/Sounds/Tink.aiff")
+_DEFAULT_STOP_SOUND = Path("/System/Library/Sounds/Pop.aiff")
 
 
 @dataclass(frozen=True)
@@ -37,11 +40,15 @@ class ModelConfig:
     language: str = "en"
 
 
+_VALID_HOTKEY_MODIFIERS = {"<alt>", "<shift>", "<ctrl>", "<cmd>"}
+
+
 @dataclass(frozen=True)
 class HotkeyConfig:
-    """Global record hotkey keyspec."""
+    """Double-tap modifier to trigger record."""
 
-    record: str = "<ctrl>+<cmd>+r"
+    record: str = "<alt>"
+    double_tap_window_ms: int = 400
 
 
 @dataclass(frozen=True)
@@ -78,6 +85,15 @@ class LogConfig:
 
 
 @dataclass(frozen=True)
+class SoundConfig:
+    """Short audio cues played on recording start/stop."""
+
+    enabled: bool = True
+    start_path: Path = field(default_factory=lambda: _DEFAULT_START_SOUND)
+    stop_path: Path = field(default_factory=lambda: _DEFAULT_STOP_SOUND)
+
+
+@dataclass(frozen=True)
 class Config:
     """Top-level whisperlite config, one field per TOML table."""
 
@@ -87,6 +103,7 @@ class Config:
     inject: InjectConfig = field(default_factory=InjectConfig)
     ui: UIConfig = field(default_factory=UIConfig)
     log: LogConfig = field(default_factory=LogConfig)
+    sound: SoundConfig = field(default_factory=SoundConfig)
 
 
 def get_effective_config_path() -> Path:
@@ -213,6 +230,7 @@ def _overlay(raw: dict[str, Any]) -> Config:
         inject = _overlay_dataclass(defaults.inject, raw.get("inject", {}))
         ui = _overlay_ui(defaults.ui, raw.get("ui", {}))
         log = _overlay_dataclass(defaults.log, raw.get("log", {}))
+        sound = _overlay_sound(defaults.sound, raw.get("sound", {}))
     except TypeError as exc:
         raise ConfigError(f"config table has the wrong shape: {exc}") from exc
 
@@ -223,7 +241,33 @@ def _overlay(raw: dict[str, Any]) -> Config:
         inject=inject,
         ui=ui,
         log=log,
+        sound=sound,
     )
+
+
+_SOUND_PATH_FIELDS = ("start_path", "stop_path")
+
+
+def _overlay_sound(default: SoundConfig, table: Any) -> SoundConfig:
+    if not isinstance(table, dict):
+        raise ConfigError(
+            f"[sound] expected table, got {type(table).__name__}"
+        )
+    updates: dict[str, Any] = {}
+    known = {f.name for f in fields(default)}
+    for key, value in table.items():
+        if key not in known:
+            logger.warning("unknown config key %r under [sound] (ignored)", key)
+            continue
+        if key in _SOUND_PATH_FIELDS:
+            if not isinstance(value, str) or not value:
+                raise ConfigError(
+                    f"[sound] {key} must be a non-empty string, got {value!r}"
+                )
+            updates[key] = Path(value).expanduser()
+        else:
+            updates[key] = value
+    return replace(default, **updates)
 
 
 _UI_ICON_FIELDS = ("idle_icon", "recording_icon", "error_icon")
@@ -288,6 +332,7 @@ def _validate(config: Config) -> None:
     _validate_ui(config.ui)
     _validate_log_shape(config.log)
     _validate_hotkey(config.hotkey)
+    _validate_sound(config.sound)
 
 
 def _validate_model(model: ModelConfig) -> None:
@@ -372,16 +417,39 @@ def _validate_log_shape(log: LogConfig) -> None:
 def _validate_hotkey(hotkey: HotkeyConfig) -> None:
     if not isinstance(hotkey.record, str) or not hotkey.record:
         raise ConfigError("[hotkey] record must be a non-empty string")
-    try:
-        from pynput.keyboard import HotKey
-    except ImportError as exc:
-        raise ConfigError(f"pynput is required to validate [hotkey] record: {exc}") from exc
-    try:
-        HotKey.parse(hotkey.record)
-    except ValueError as exc:
+    if hotkey.record not in _VALID_HOTKEY_MODIFIERS:
         raise ConfigError(
-            f"[hotkey] record is not a valid keyspec: {hotkey.record!r} ({exc})"
-        ) from exc
+            "[hotkey] record must be one of "
+            f"{sorted(_VALID_HOTKEY_MODIFIERS)}, got {hotkey.record!r}"
+        )
+    if not _is_plain_int(hotkey.double_tap_window_ms):
+        raise ConfigError(
+            "[hotkey] double_tap_window_ms must be an integer, got "
+            f"{hotkey.double_tap_window_ms!r}"
+        )
+    if not 150 <= hotkey.double_tap_window_ms <= 1000:
+        raise ConfigError(
+            "[hotkey] double_tap_window_ms must be in [150, 1000], got "
+            f"{hotkey.double_tap_window_ms}"
+        )
+
+
+def _validate_sound(sound: SoundConfig) -> None:
+    if not isinstance(sound.enabled, bool):
+        raise ConfigError(
+            f"[sound] enabled must be a bool, got {sound.enabled!r} "
+            f"({type(sound.enabled).__name__})"
+        )
+    for name in _SOUND_PATH_FIELDS:
+        value = getattr(sound, name)
+        if not isinstance(value, Path):
+            raise ConfigError(
+                f"[sound] {name} must be a Path, got {type(value).__name__}"
+            )
+        if not value.exists():
+            raise ConfigError(
+                f"[sound] {name} does not exist: {value}"
+            )
 
 
 def _is_plain_int(value: Any) -> bool:

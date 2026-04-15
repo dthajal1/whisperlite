@@ -25,7 +25,8 @@ from whisperlite.errors import (
     WhisperliteError,
 )
 from whisperlite.hotkey import CancelListener, HotkeyManager
-from whisperlite.inject import capture_focused_app, inject_text
+from whisperlite.inject import inject_text
+from whisperlite.sounds import play
 from whisperlite.transcribe import download_model, is_model_cached, transcribe, warmup
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,6 @@ class WhisperliteApp(rumps.App):
         self._worker_thread: threading.Thread | None = None
         self._shutting_down = False
         self._last_error: str | None = None
-        self._target_pid: int | None = None
         self._recording_started_at: float | None = None
         self._max_duration_timer: threading.Timer | None = None
         self._download_thread: threading.Thread | None = None
@@ -178,7 +178,8 @@ class WhisperliteApp(rumps.App):
 
         try:
             self._hotkey_manager = HotkeyManager(
-                record_keyspec=self._config.hotkey.record,
+                modifier=self._config.hotkey.record,
+                double_tap_window_ms=self._config.hotkey.double_tap_window_ms,
                 on_record_pressed=self._on_hotkey_pressed,
             )
             self._hotkey_manager.start()
@@ -423,8 +424,6 @@ class WhisperliteApp(rumps.App):
             return
 
     def _start_recording(self) -> None:
-        self._target_pid = capture_focused_app()
-        logger.info("captured target_pid=%s at record-start", self._target_pid)
         self._recorder.start()
         try:
             self._cancel_listener = CancelListener(on_cancel=self._on_cancel_pressed)
@@ -441,8 +440,12 @@ class WhisperliteApp(rumps.App):
         self._max_duration_timer.start()
         self._recording_started_at = time.monotonic()
         self._set_state(State.RECORDING, icon=self._config.ui.recording_icon)
+        if self._config.sound.enabled:
+            play(self._config.sound.start_path)
 
     def _finish_recording_and_transcribe(self) -> None:
+        if self._config.sound.enabled:
+            play(self._config.sound.stop_path)
         self._stop_cancel_listener()
         self._cancel_max_duration_timer()
         audio = self._recorder.stop_and_drain()
@@ -459,20 +462,18 @@ class WhisperliteApp(rumps.App):
             return
 
         self._set_state(State.INJECTING, icon=self._config.ui.recording_icon)
-        inject_text(
-            text, self._target_pid, paste_delay_ms=self._config.inject.paste_delay_ms
-        )
-        self._target_pid = None
+        inject_text(text, paste_delay_ms=self._config.inject.paste_delay_ms)
         self._set_state(State.IDLE, icon=self._config.ui.idle_icon)
 
     def _cancel_recording(self) -> None:
+        if self._config.sound.enabled:
+            play(self._config.sound.stop_path)
         self._stop_cancel_listener()
         self._cancel_max_duration_timer()
         try:
             self._recorder.cancel()
         except Exception as exc:
             logger.warning("recorder cancel raised: %s", exc)
-        self._target_pid = None
         self._recording_started_at = None
         self._set_state(State.IDLE, icon=self._config.ui.idle_icon)
 
@@ -523,7 +524,6 @@ class WhisperliteApp(rumps.App):
         except Exception:
             pass
         self._recording_started_at = None
-        self._target_pid = None
         self._set_state(State.ERROR, icon=self._config.ui.error_icon)
 
     def _enter_disabled(self, message: str) -> None:

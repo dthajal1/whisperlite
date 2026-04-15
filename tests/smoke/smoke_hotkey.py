@@ -10,26 +10,45 @@ from whisperlite.errors import WhisperlitePermissionError
 from whisperlite.hotkey import HotkeyManager
 
 
+_MODIFIER_HUMAN_NAMES: dict[str, str] = {
+    "<alt>": "Option (Opt/Alt)",
+    "<shift>": "Shift",
+    "<ctrl>": "Control",
+    "<cmd>": "Command",
+}
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
     cfg = load_config()
-    record_keyspec = cfg.hotkey.record
-    print(f"Press {record_keyspec} within 30 seconds. Press Ctrl+C to abort.")
+    record_modifier = cfg.hotkey.record
+    human_name = _MODIFIER_HUMAN_NAMES.get(record_modifier, record_modifier)
+    window_ms = cfg.hotkey.double_tap_window_ms
+    print(
+        f"Double-tap {human_name} (within {window_ms}ms) within 30 seconds. "
+        "Press Ctrl+C to abort."
+    )
 
     pressed = {"flag": False}
 
     def on_record() -> None:
         pressed["flag"] = True
-        print("Got hotkey!")
+        print("Got double-tap!")
 
-    mgr = HotkeyManager(record_keyspec=record_keyspec, on_record_pressed=on_record)
+    mgr = HotkeyManager(
+        modifier=record_modifier,
+        double_tap_window_ms=window_ms,
+        on_record_pressed=on_record,
+    )
 
     try:
         mgr.start()
     except WhisperlitePermissionError as exc:
         print(f"FAIL: could not start hotkey listener: {exc}")
-        print("Grant Input Monitoring and Accessibility permissions to your "
-              "terminal/python binary in System Settings > Privacy & Security.")
+        print(
+            "Grant Input Monitoring and Accessibility permissions to your "
+            "terminal/python binary in System Settings > Privacy & Security."
+        )
         return 1
 
     try:
@@ -46,9 +65,12 @@ def main() -> int:
     if pressed["flag"]:
         print("PASS")
         return 0
-    print(f"FAIL: hotkey never received within timeout. Check Input Monitoring "
-          f"+ Accessibility permissions in System Settings, and verify "
-          f"{record_keyspec} is not bound to another app.")
+    print(
+        f"FAIL: double-tap never received within timeout. Check Input "
+        f"Monitoring + Accessibility permissions in System Settings, and "
+        f"verify no key-remap utility (Karabiner, etc.) is intercepting "
+        f"{human_name}."
+    )
     return 1
 
 

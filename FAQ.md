@@ -19,14 +19,18 @@ for clues and file an issue with the relevant log output.
 - [Hotkey](#hotkey)
   - [Q: F5 doesn't work as the record hotkey](#q-f5-doesnt-work-as-the-record-hotkey)
   - [Q: Can I use the fn key?](#q-can-i-use-the-fn-key)
+  - [Q: How do I change the hotkey?](#q-how-do-i-change-the-hotkey)
+  - [Q: I double-tap Opt but whisperlite doesn't respond](#q-i-double-tap-opt-but-whisperlite-doesnt-respond)
 - [Text injection](#text-injection)
   - [Q: I dictate but nothing appears anywhere](#q-i-dictate-but-nothing-appears-anywhere)
   - [Q: The transcript pastes into my terminal instead of the app I was in](#q-the-transcript-pastes-into-my-terminal-instead-of-the-app-i-was-in)
-  - [Q: Why is dictation ~1 second slower on Sequoia?](#q-why-is-dictation-1-second-slower-on-sequoia)
   - [Q: smoke_inject.py runs but nothing appears in TextEdit / Notes](#q-smoke_injectpy-runs-but-nothing-appears-in-textedit--notes)
 - [Config](#config)
   - [Q: Where is my config file?](#q-where-is-my-config-file)
   - [Q: "Open Config File" menu item does nothing](#q-open-config-file-menu-item-does-nothing)
+- [Sounds](#sounds)
+  - [Q: Can I disable the sound cues?](#q-can-i-disable-the-sound-cues)
+  - [Q: Can I use different sounds?](#q-can-i-use-different-sounds)
 - [Transcription](#transcription)
   - [Q: First run takes forever — is it hung?](#q-first-run-takes-forever--is-it-hung)
   - [Q: How do I change the Whisper model?](#q-how-do-i-change-the-whisper-model)
@@ -119,11 +123,10 @@ smoke tests from there. Your iTerm2 workflow stays untouched.
 **Cause:** The two TCC categories cover different operations:
 
 - **Input Monitoring** lets a process *read* global keystrokes. This is
-  how whisperlite captures your hotkey (e.g. Ctrl+Cmd+R) while you're
-  typing in some other app.
-- **Accessibility** lets a process *synthesize* keystrokes and control
-  other apps. This is how whisperlite posts Cmd+V to paste the
-  transcript, and how it brings the target app to the front.
+  how whisperlite detects your double-tap of Opt (or whichever modifier
+  you configured) while you're typing in some other app.
+- **Accessibility** lets a process *synthesize* keystrokes. This is how
+  whisperlite posts Cmd+V to paste the transcript into the focused app.
 
 **Fix:** whisperlite needs both. Granting only Input Monitoring will
 capture hotkeys fine but the paste will silently fail. Granting only
@@ -174,33 +177,31 @@ orphaned old-version entry from both lists to keep them clean.
 
 ### Q: F5 doesn't work as the record hotkey
 
-**Symptom:** Pressing F5 when whisperlite is running doesn't start
-recording. The menubar stays 🎤 idle.
+**Symptom:** You tried setting a function key like F5 as the record
+hotkey in an older config and it didn't work.
 
 **Cause:** On macOS 14+ (Sonoma and later), Apple changed how function-key
-events are routed, and pynput's `GlobalHotKeys` listener frequently fails
-to receive them — even when Input Monitoring is granted correctly. Some
-Macs also have F5 bound to system Dictation, Mission Control "Show all
-windows", or backlight control, which intercepts the event before
-userspace hotkey listeners see it.
+events are routed, and userspace keyboard listeners frequently fail to
+receive them — even when Input Monitoring is granted correctly. Some
+Macs also have F5 bound to system Dictation, Mission Control, or
+backlight control, which intercepts the event before userspace listeners
+see it. whisperlite v1 does not support function keys as the record
+hotkey at all.
 
-**Fix:** Change your hotkey to a modifier combo, which is much more
-reliable. Edit `whisperlite.toml` in the project root (see the Config
-section for file paths) and set:
+**Fix:** Use the default double-tap modifier pattern. `whisperlite.toml`
+ships with:
 
 ```toml
 [hotkey]
-record = "<ctrl>+<cmd>+r"
+record = "<alt>"
+double_tap_window_ms = 400
 ```
 
-Good modifier-combo choices:
-
-- `<ctrl>+<cmd>+r`
-- `<ctrl>+<alt>+<space>`
-- `<cmd>+<shift>+<space>`
-
-Avoid combinations that conflict with system shortcuts: Cmd+Space is
-Spotlight, Cmd+Tab is the app switcher, etc.
+Double-tap Opt within 400ms to start recording, double-tap again to
+stop. Valid `record` values are `<alt>`, `<shift>`, `<ctrl>`, `<cmd>` —
+nothing else. This pattern (inspired by JetBrains' double-Shift "Search
+Everywhere") never collides with app-defined chords and feels like a
+hidden single-key shortcut once you get used to it.
 
 ---
 
@@ -210,13 +211,78 @@ Spotlight, Cmd+Tab is the app switcher, etc.
 it's ergonomic and otherwise unused.
 
 **Cause:** pynput cannot capture `fn` on macOS. `fn` is a special HID-layer
-flag, not a regular keyboard event, and pynput's `GlobalHotKeys` doesn't
-expose it. Whispr Flow works around this by using low-level Quartz event
-taps to handle `fn` directly.
+flag, not a regular keyboard event, and pynput's keyboard listener
+doesn't expose it. Whispr Flow works around this by using low-level
+Quartz event taps to handle `fn` directly.
 
-**Fix:** Use a modifier combo instead (see previous question). Adding
-`fn` support to whisperlite via a Quartz event tap is tracked as a future
-TODO but is not available in v1.
+**Fix:** Use the default double-tap Opt (or double-tap any of
+`<alt>`/`<shift>`/`<ctrl>`/`<cmd>`) instead. Adding `fn` support via a
+Quartz event tap is tracked as a future TODO but is not available in v1.
+
+---
+
+### Q: How do I change the hotkey?
+
+**Symptom:** You want a different modifier than the default Opt/Alt.
+
+**Cause:** whisperlite v1 uses a double-tap modifier pattern: double-tap
+the configured modifier within a short window to start recording,
+double-tap again to stop. The only four valid modifiers are `<alt>`,
+`<shift>`, `<ctrl>`, and `<cmd>`. Chords (like `<ctrl>+<cmd>+r`) and
+non-modifier keys (letters, function keys) are not supported.
+
+**Fix:** Edit `whisperlite.toml` and set:
+
+```toml
+[hotkey]
+record = "<alt>"              # one of <alt>, <shift>, <ctrl>, <cmd>
+double_tap_window_ms = 400    # range: [150, 1000]
+```
+
+Tuning tips:
+
+- `<alt>` (Option) is the default because it's rarely used alone on
+  macOS, so false-positive risk is low.
+- `<shift>` matches JetBrains' "Search Everywhere" muscle memory but
+  risks triggering while you're typing capital letters if your tap
+  window is too wide.
+- `<cmd>` and `<ctrl>` are both used heavily as chord modifiers — a
+  chord (e.g. Cmd+C) correctly does NOT count as a tap, but brushing
+  Cmd twice while reaching for a shortcut can still fire it.
+- Drop `double_tap_window_ms` to ~250 if you get accidental triggers,
+  raise to ~600 if you're missing taps.
+
+---
+
+### Q: I double-tap Opt but whisperlite doesn't respond
+
+**Symptom:** You're running whisperlite, the menubar icon is idle, and
+double-tapping Opt (or your configured modifier) does nothing.
+
+**Cause:** One of:
+
+1. Input Monitoring is not granted to the Python binary running
+   whisperlite (the listener literally doesn't see the keystroke).
+2. A key-remap utility like Karabiner-Elements is swallowing the
+   modifier before the listener sees it.
+3. Your taps are landing more than `double_tap_window_ms` apart.
+4. You're accidentally using the modifier in a chord (e.g. Opt+Space to
+   switch input source) — the chord correctly disqualifies the press
+   from counting as a tap.
+
+**Fix:**
+
+1. Verify Input Monitoring and Accessibility permissions. See the
+   Permissions & TCC section above for exact steps. Run
+   `python tests/smoke/smoke_hotkey.py` and double-tap the modifier — it
+   should print `Got double-tap!` within 30 seconds.
+2. If you have Karabiner-Elements or any other key-remap utility
+   installed, check its rules for anything that remaps the modifier you
+   chose. Try a different modifier (`<shift>` is least likely to be
+   remapped) or temporarily disable the remap utility.
+3. Tail `~/Library/Logs/whisperlite.log` and look for
+   `hotkey manager started` at launch. If it's there, the listener is
+   running — the problem is further upstream.
 
 ---
 
@@ -224,14 +290,20 @@ TODO but is not available in v1.
 
 ### Q: I dictate but nothing appears anywhere
 
-**Symptom:** You press Ctrl+Cmd+R in Notes, speak, press again, and
-nothing happens. No text appears anywhere.
+**Symptom:** You double-tap Opt in Notes, speak, double-tap Opt again,
+and nothing happens. No text appears anywhere.
 
-**Cause:** Missing Accessibility grant for keystroke synthesis. Input
-Monitoring covers *capturing* keystrokes; *synthesizing* them (for the
-Cmd+V paste) requires Accessibility. If Accessibility is missing for
-either `python3.10` or your terminal app (the responsible process under
-Sequoia), the paste is silently refused by macOS.
+**Cause:** One of three things:
+
+1. **Missing Accessibility grant for keystroke synthesis.** Input
+   Monitoring covers *capturing* keystrokes; *synthesizing* them (for
+   the Cmd+V paste) requires Accessibility. Without it, the paste is
+   silently refused by macOS.
+2. **The target app doesn't support paste.** This is vanishingly rare
+   on macOS — essentially every text input honors Cmd+V.
+3. **The pasteboard write itself failed.** Another app may have grabbed
+   the pasteboard at the same moment, or the system pasteboard daemon
+   may be in a bad state.
 
 **Fix:** Verify both panes have both entries:
 
@@ -252,57 +324,29 @@ fallback.
 
 ### Q: The transcript pastes into my terminal instead of the app I was in
 
-**Symptom:** You press Ctrl+Cmd+R in Notes, speak, switch to your
-terminal mid-recording, press again, and the text pastes into the
-terminal instead of Notes.
+**Symptom:** You double-tap Opt in Notes, speak, switch to your
+terminal mid-recording, double-tap Opt again, and the text pastes into
+the terminal instead of Notes.
 
-**Cause:** Sequoia focus-stealing protection. Even with correct
-permissions, macOS 15 refuses to let apps forcibly transfer keyboard
-focus away from the user's currently-active app. When whisperlite calls
-`NSRunningApplication.activate(options:)` to bring Notes to the front
-before pasting, Sequoia silently blocks it: Notes' window comes forward
-visually, but keyboard focus stays on the terminal (or whatever was
-last user-active), so the subsequent Cmd+V lands in the wrong app.
+**Cause:** whisperlite now pastes to whichever app is focused at the
+moment you stop recording, not the app you started in. If you want text
+in Slack, make sure Slack is focused when you double-tap Opt to stop.
 
-**Fix:** whisperlite already handles this — `inject.py` has a fallback
-that detects the blocked activation and retries via
-`osascript -e 'tell application "X" to activate'`, which sends an
-AppleEvent that Sequoia honors. You should see this in
-`~/Library/Logs/whisperlite.log`:
+This is a deliberate trade-off for faster dictation — the previous
+behavior captured the record-start app and re-activated it before
+pasting, which added ~1 second of latency on macOS Sequoia due to
+Apple's focus-stealing protection. Dropping that whole code path
+removed ~800–900ms of end-to-end inject latency.
 
-```
-INFO whisperlite.inject: native activation blocked, trying AppleScript fallback for 'Notes'
-```
+**Fix:** Don't alt-tab mid-recording. The normal flow for a 3-second
+utterance is: focus the target app, double-tap Opt, speak, double-tap
+Opt — no window switching in between. If you need to paste into a
+different app than the one you started recording in, just make sure
+that app is frontmost when you double-tap Opt to stop.
 
-Troubleshooting steps:
-
-1. Check the log for the line above. If it's absent, the fallback didn't
-   run — likely a code regression; file a bug.
-2. If the line is present but the paste still goes to the wrong app,
-   there's a deeper Sequoia lockdown (rare — happens with certain
-   enterprise MDM profiles that disable AppleEvents). In that case, the
-   transcribed text is copied to your clipboard and you can press Cmd+V
-   manually to paste.
-3. As a workflow tip, don't switch apps mid-recording. whisperlite
-   captures the target app at record-start time; switching apps while
-   speaking just confuses things.
-
----
-
-### Q: Why is dictation ~1 second slower on Sequoia?
-
-**Symptom:** End-to-end inject latency on macOS 15 feels sluggish
-compared to older macOS — roughly 1.1s instead of ~280ms.
-
-**Cause:** The AppleScript activation fallback described in the previous
-question. whisperlite has to poll (up to 500ms) for native activation
-to succeed before giving up and invoking `osascript`, which itself adds
-another few hundred milliseconds of overhead.
-
-**Fix:** This is a known cost of Sequoia's focus-stealing protection and
-is tracked as a future optimization — specifically, reducing the poll
-timeout and/or skipping the native attempt entirely on Sequoia. For now,
-it's the price of reliable cross-app paste on macOS 15.
+As a fallback, the transcribed text is also written to your clipboard,
+so if the paste lands in the wrong place you can Cmd+V into the right
+app manually.
 
 ---
 
@@ -317,23 +361,18 @@ it's the price of reliable cross-app paste on macOS 15.
   Cmd+V was synthesized, or
 - **(b)** Accessibility is missing for keystroke synthesis.
 
-Most commonly (a): if the script captures the focused app *at inject
-time* rather than at record-start time, and you switched back to the
-terminal to press Enter in the middle of the test, the capture returns
-the terminal's PID and the paste goes to the terminal (where Cmd+V does
-nothing visible in zsh).
+Most commonly (a): whisperlite pastes to whatever app is frontmost at
+inject time, so if you bounced back to the terminal to press Enter and
+didn't click back into Notes before the paste fires, Cmd+V lands in the
+terminal (where it does nothing visible in zsh).
 
-**Fix:** The current `smoke_inject.py` handles this by re-activating the
-target app after you press Enter and sleeping 1.5s before capturing
-focus. If the bug persists:
+**Fix:** Click into the Notes document body immediately after pressing
+Enter in the terminal, so Notes is frontmost when the paste runs. If
+the bug persists:
 
-1. Check the printed `captured focused app pid=XXXX` line. Compare to
-   `pgrep -ix Notes` — if they match, focus capture is correct. If not,
-   the timing window needs widening.
-2. Before running the script, open Notes and click inside a note body so
-   the cursor is placed there. Notes remembers the cursor position when
-   re-activated.
-3. Check the actual clipboard contents after the script exits:
+1. Before running the script, open Notes and click inside a note body so
+   the cursor is placed there.
+2. Check the actual clipboard contents after the script exits:
 
    ```bash
    pbpaste
@@ -406,6 +445,64 @@ the search order and will open whichever file was actually loaded.
 
 ---
 
+## Sounds
+
+### Q: Can I disable the sound cues?
+
+**Symptom:** The Tink/Pop sounds when you start/stop recording are
+annoying, or you need whisperlite to be silent during meetings.
+
+**Cause:** whisperlite plays a short macOS system sound when recording
+begins (default `Tink.aiff`) and a different one when it ends (default
+`Pop.aiff`). They're enabled by default.
+
+**Fix:** Edit `whisperlite.toml` and set:
+
+```toml
+[sound]
+enabled = false
+```
+
+Restart whisperlite for the change to take effect.
+
+---
+
+### Q: Can I use different sounds?
+
+**Symptom:** You want something other than Tink and Pop.
+
+**Cause:** The defaults point at two of macOS's built-in system sounds.
+macOS ships ~15 of them at `/System/Library/Sounds/`, and whisperlite
+is happy to play any of them — or any `.aiff`/`.wav`/`.mp3` file on
+disk, since playback goes through `afplay`.
+
+**Fix:** The built-in options are:
+
+```
+Basso.aiff  Blow.aiff     Bottle.aiff  Frog.aiff    Funk.aiff
+Glass.aiff  Hero.aiff     Morse.aiff   Ping.aiff    Pop.aiff
+Purr.aiff   Sosumi.aiff   Submarine.aiff  Tink.aiff
+```
+
+Preview any of them from the terminal before committing:
+
+```bash
+afplay /System/Library/Sounds/Funk.aiff
+```
+
+Then edit `whisperlite.toml`:
+
+```toml
+[sound]
+start_path = "/System/Library/Sounds/Funk.aiff"
+stop_path = "/System/Library/Sounds/Bottle.aiff"
+```
+
+You can also point at your own audio files — `afplay` handles `.aiff`,
+`.wav`, and `.mp3`. Use an absolute path.
+
+---
+
 ## Transcription
 
 ### Q: First run takes forever — is it hung?
@@ -467,9 +564,8 @@ something unexpected happens, the log line immediately before and after
 usually tells you most of the story. Specifically watch for:
 
 - `state -> ERROR` lines — followed by the error message
-- `captured target_pid=…` lines — confirms focus capture at record-start
-- Lines from `whisperlite.inject` — activation fallback, pasteboard
-  guards, etc.
+- Lines from `whisperlite.inject` — pasteboard writes, paste synthesis
+- Lines from `whisperlite.transcribe` — model load, transcription timing
 - Lines from `whisperlite.hotkey` — listener start/stop
 - `WARNING`-level lines — usually recoverable issues that are still
   worth attention

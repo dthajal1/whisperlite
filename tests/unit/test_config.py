@@ -13,11 +13,14 @@ from whisperlite.config import (
     InjectConfig,
     LogConfig,
     ModelConfig,
+    SoundConfig,
     UIConfig,
     _BUNDLED_ASSETS_DIR,
     _DEFAULT_ERROR_ICON,
     _DEFAULT_IDLE_ICON,
     _DEFAULT_RECORDING_ICON,
+    _DEFAULT_START_SOUND,
+    _DEFAULT_STOP_SOUND,
     _find_config_path,
     ensure_config_exists,
     get_effective_config_path,
@@ -44,7 +47,7 @@ def test_default_config_values(tmp_path: Path) -> None:
     assert config.model == ModelConfig(
         name="mlx-community/whisper-medium-mlx", language="en"
     )
-    assert config.hotkey == HotkeyConfig(record="<ctrl>+<cmd>+r")
+    assert config.hotkey == HotkeyConfig(record="<alt>", double_tap_window_ms=400)
     assert config.audio == AudioConfig(
         max_recording_seconds=60, sample_rate=16000, channels=1
     )
@@ -79,7 +82,7 @@ def test_load_config_partial_table(tmp_path: Path) -> None:
     config = load_config(path)
     assert config.model.name == "org/custom-model"
     assert config.model.language == "en"
-    assert config.hotkey.record == "<ctrl>+<cmd>+r"
+    assert config.hotkey.record == "<alt>"
 
 
 def test_invalid_toml_raises_config_error(tmp_path: Path) -> None:
@@ -297,6 +300,46 @@ def test_validation_icon_path_does_not_exist(tmp_path: Path) -> None:
         load_config(path)
 
 
+def test_default_sound_config_is_enabled(tmp_path: Path) -> None:
+    config = load_config(tmp_path / "nope.toml")
+    assert config.sound.enabled is True
+
+
+def test_default_sound_paths_point_to_system_sounds(tmp_path: Path) -> None:
+    config = load_config(tmp_path / "nope.toml")
+    assert config.sound.start_path == _DEFAULT_START_SOUND
+    assert config.sound.stop_path == _DEFAULT_STOP_SOUND
+
+
+def test_sound_enabled_false_disables_sounds(tmp_path: Path) -> None:
+    path = _write(tmp_path, "[sound]\nenabled = false\n")
+    config = load_config(path)
+    assert config.sound.enabled is False
+
+
+def test_custom_start_path_is_loaded(tmp_path: Path) -> None:
+    fake_sound = tmp_path / "custom.aiff"
+    fake_sound.write_bytes(b"\x00\x01")
+    body = f'[sound]\nstart_path = "{fake_sound}"\n'
+    path = _write(tmp_path, body)
+    config = load_config(path)
+    assert config.sound.start_path == fake_sound
+
+
+def test_sound_validation_nonexistent_path_raises_config_error(
+    tmp_path: Path,
+) -> None:
+    path = _write(tmp_path, '[sound]\nstart_path = "/tmp/whisperlite-nope-xyz.aiff"\n')
+    with pytest.raises(ConfigError, match="start_path"):
+        load_config(path)
+
+
+def test_sound_enabled_wrong_type_raises_config_error(tmp_path: Path) -> None:
+    path = _write(tmp_path, '[sound]\nenabled = "yes"\n')
+    with pytest.raises(ConfigError, match="enabled"):
+        load_config(path)
+
+
 def test_load_config_with_no_files_returns_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -310,4 +353,4 @@ def test_load_config_with_no_files_returns_defaults(
     assert config.model == ModelConfig()
     assert config.hotkey == HotkeyConfig()
     assert config.audio == AudioConfig()
-    assert config.hotkey.record == "<ctrl>+<cmd>+r"
+    assert config.hotkey.record == "<alt>"

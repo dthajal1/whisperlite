@@ -12,10 +12,13 @@ from whisperlite.config import (
     InjectConfig,
     LogConfig,
     ModelConfig,
+    SoundConfig,
     UIConfig,
     _DEFAULT_ERROR_ICON,
     _DEFAULT_IDLE_ICON,
     _DEFAULT_RECORDING_ICON,
+    _DEFAULT_START_SOUND,
+    _DEFAULT_STOP_SOUND,
 )
 from whisperlite.errors import TranscribeError, WhisperlitePermissionError
 
@@ -24,7 +27,7 @@ from whisperlite.errors import TranscribeError, WhisperlitePermissionError
 def fake_config() -> Config:
     return Config(
         model=ModelConfig(name="fake/model", language="en"),
-        hotkey=HotkeyConfig(record="<f5>"),
+        hotkey=HotkeyConfig(record="<alt>", double_tap_window_ms=400),
         audio=AudioConfig(max_recording_seconds=10, sample_rate=16000, channels=1),
         inject=InjectConfig(paste_delay_ms=10),
         ui=UIConfig(
@@ -33,6 +36,11 @@ def fake_config() -> Config:
             error_icon=_DEFAULT_ERROR_ICON,
         ),
         log=LogConfig(level="INFO", path="/tmp/whisperlite-test.log"),
+        sound=SoundConfig(
+            enabled=False,
+            start_path=_DEFAULT_START_SOUND,
+            stop_path=_DEFAULT_STOP_SOUND,
+        ),
     )
 
 
@@ -62,10 +70,8 @@ def mocks(mocker):
         "whisperlite.app.is_model_cached", return_value=True
     )
     download_mock = mocker.patch("whisperlite.app.download_model")
-    capture_mock = mocker.patch(
-        "whisperlite.app.capture_focused_app", return_value=1234
-    )
     inject_mock = mocker.patch("whisperlite.app.inject_text")
+    play_mock = mocker.patch("whisperlite.app.play")
 
     return {
         "recorder": recorder_instance,
@@ -75,8 +81,8 @@ def mocks(mocker):
         "warmup": warmup_mock,
         "is_model_cached": is_cached_mock,
         "download_model": download_mock,
-        "capture_focused_app": capture_mock,
         "inject_text": inject_mock,
+        "play": play_mock,
     }
 
 
@@ -103,9 +109,7 @@ def test_state_machine_idle_to_recording_on_hotkey(app, mocks):
     app._handle_event(HotkeyPressed())
 
     assert app._state == State.RECORDING
-    assert app._target_pid == 1234
     mocks["recorder"].start.assert_called_once()
-    mocks["capture_focused_app"].assert_called_once()
 
 
 def test_state_machine_recording_to_idle_via_hotkey_again(app, mocks):
@@ -123,7 +127,6 @@ def test_state_machine_recording_to_idle_via_hotkey_again(app, mocks):
     mocks["inject_text"].assert_called_once()
     args, kwargs = mocks["inject_text"].call_args
     assert args[0] == "hello world"
-    assert args[1] == 1234
 
 
 def test_state_machine_cancel_mid_recording(app, mocks):
@@ -325,6 +328,48 @@ def test_model_download_failed_event_disables_app(app, mocks):
 
     assert app._state == State.DISABLED
     assert "404" in (app._last_error or "")
+
+
+def test_play_start_sound_called_on_enter_recording(mocks, fake_config):
+    from dataclasses import replace
+    from whisperlite.app import HotkeyPressed, State, WhisperliteApp
+
+    cfg = replace(fake_config, sound=replace(fake_config.sound, enabled=True))
+    instance = WhisperliteApp(cfg)
+    try:
+        instance._set_state(State.IDLE, icon=_DEFAULT_IDLE_ICON)
+        instance._handle_event(HotkeyPressed())
+        mocks["play"].assert_any_call(cfg.sound.start_path)
+    finally:
+        if instance._max_duration_timer is not None:
+            instance._max_duration_timer.cancel()
+
+
+def test_play_stop_sound_called_on_exit_recording(mocks, fake_config):
+    from dataclasses import replace
+    from whisperlite.app import HotkeyPressed, State, WhisperliteApp
+
+    cfg = replace(fake_config, sound=replace(fake_config.sound, enabled=True))
+    instance = WhisperliteApp(cfg)
+    try:
+        instance._set_state(State.IDLE, icon=_DEFAULT_IDLE_ICON)
+        instance._handle_event(HotkeyPressed())  # -> RECORDING
+        mocks["play"].reset_mock()
+        instance._handle_event(HotkeyPressed())  # -> IDLE via transcribe+inject
+        mocks["play"].assert_any_call(cfg.sound.stop_path)
+    finally:
+        if instance._max_duration_timer is not None:
+            instance._max_duration_timer.cancel()
+
+
+def test_sound_not_played_when_disabled(app, mocks):
+    from whisperlite.app import HotkeyPressed, State
+
+    # fake_config fixture already disables sound
+    _make_idle(app)
+    app._handle_event(HotkeyPressed())
+    app._handle_event(HotkeyPressed())
+    mocks["play"].assert_not_called()
 
 
 def test_on_open_config_uses_effective_path_and_ensures_file(app, mocker, tmp_path):

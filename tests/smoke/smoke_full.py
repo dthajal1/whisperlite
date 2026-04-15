@@ -20,7 +20,7 @@ import time
 from whisperlite.audio import AudioRecorder
 from whisperlite.config import load_config
 from whisperlite.errors import WhisperliteError
-from whisperlite.inject import capture_focused_app, inject_text
+from whisperlite.inject import inject_text
 from whisperlite.transcribe import (
     download_model,
     is_model_cached,
@@ -87,12 +87,7 @@ def main() -> int:
     try:
         subprocess.run(["open", "-a", "Notes"], check=False)
         time.sleep(1.5)
-        target_pid = capture_focused_app()
-        print(f"captured focused app pid={target_pid}")
-        if target_pid is None:
-            print("ERROR: could not capture focused app", file=sys.stderr)
-            return 1
-        inject_text(text, target_pid, paste_delay_ms=config.inject.paste_delay_ms)
+        inject_text(text, paste_delay_ms=config.inject.paste_delay_ms)
     except WhisperliteError as exc:
         print(f"ERROR: inject failed: {exc}", file=sys.stderr)
         return 1
