@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import queue
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -38,6 +39,30 @@ _INJECT_WAIT_TIMEOUT_S = 0.5
 _DOWNLOAD_JOIN_TIMEOUT_S = 1.0
 _WORKER_JOIN_TIMEOUT_S = 2.0
 _QUEUE_POLL_S = 0.5
+
+# macOS deeplinks into the relevant Privacy panes. Used by the disabled-state
+# "Fix in System Settings" menu action.
+_SETTINGS_URL_MICROPHONE = (
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+)
+_SETTINGS_URL_ACCESSIBILITY = (
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+)
+
+# Pretty names for the modifier strings pynput accepts, used in the welcome
+# message. Falls back to the raw name.
+_HOTKEY_DISPLAY_NAMES = {
+    "alt": "Option",
+    "alt_l": "Option",
+    "alt_r": "Option",
+    "ctrl": "Control",
+    "ctrl_l": "Control",
+    "ctrl_r": "Control",
+    "cmd": "Command",
+    "cmd_l": "Command",
+    "cmd_r": "Command",
+    "shift": "Shift",
+}
 
 
 class State(str, Enum):
@@ -118,6 +143,8 @@ class WhisperliteApp(rumps.App):
         self._download_thread: threading.Thread | None = None
         self._download_cancelled = threading.Event()
         self._cancel_requested: bool = False
+        self._announced_ready: bool = False
+        self._disabled_settings_url: str | None = None
 
         self._recorder = AudioRecorder(
             sample_rate=config.audio.sample_rate,
@@ -131,12 +158,15 @@ class WhisperliteApp(rumps.App):
         self._status_item.set_callback(None)
         self._last_error_item = rumps.MenuItem("")
         self._last_error_item.set_callback(None)
+        self._fix_in_settings_item = rumps.MenuItem("")
+        self._fix_in_settings_item.set_callback(None)
         self._setup_menu()
 
     def _setup_menu(self) -> None:
         self.menu = [
             self._status_item,
             self._last_error_item,
+            self._fix_in_settings_item,
             None,
             rumps.MenuItem("Open Config File", callback=self._on_open_config),
             rumps.MenuItem("Open Log File", callback=self._on_open_log),
@@ -144,6 +174,7 @@ class WhisperliteApp(rumps.App):
             rumps.MenuItem("Quit", callback=self._on_quit),
         ]
         self._last_error_item.title = ""
+        self._fix_in_settings_item.title = ""
 
     def start_worker(self) -> None:
         """Spawn the coordinator worker thread."""
@@ -164,16 +195,29 @@ class WhisperliteApp(rumps.App):
         try:
             self._probe_microphone()
         except Exception as exc:
-            self._enter_disabled(f"Microphone permission needed: {exc}")
+            logger.error("microphone probe failed: %s", exc)
+            self._enter_disabled(
+                "Needs microphone access — click below to fix.",
+                settings_url=_SETTINGS_URL_MICROPHONE,
+            )
             return
 
         if is_model_cached(self._config.model.name):
             try:
                 warmup(self._config.model.name, self._config.model.language)
             except ModelLoadError as exc:
-                self._enter_disabled(f"model load failed: {exc}")
+                logger.error("warmup failed: %s", exc)
+                self._enter_disabled(
+                    "Couldn't load the whisper model. Check the log "
+                    "for details."
+                )
                 return
         else:
+            sys.stderr.write(
+                "\nwhisperlite — first run, fetching the whisper model "
+                "(~1.5 GB, one-time)…\n"
+            )
+            sys.stderr.flush()
             self._set_state(State.DOWNLOADING, title=_DOWNLOADING_TITLE)
             self._spawn_download_thread()
 
@@ -185,13 +229,18 @@ class WhisperliteApp(rumps.App):
             )
             self._hotkey_manager.start()
         except WhisperliteError as exc:
-            self._enter_disabled(f"hotkey permission needed: {exc}")
+            logger.error("hotkey manager start failed: %s", exc)
+            self._enter_disabled(
+                "Needs accessibility access — click below to fix.",
+                settings_url=_SETTINGS_URL_ACCESSIBILITY,
+            )
             return
 
         self._trigger_accessibility_prompt()
 
         if self._state == State.INITIALIZING:
             self._set_state(State.IDLE, icon=self._config.ui.idle_icon)
+            self._announce_ready()
         logger.info("post_launch_init done, state=%s", self._state)
 
     def _probe_microphone(self) -> None:
@@ -396,10 +445,15 @@ class WhisperliteApp(rumps.App):
         if isinstance(event, ModelReady):
             if self._state == State.DOWNLOADING:
                 self._set_state(State.IDLE, icon=self._config.ui.idle_icon)
+                self._announce_ready()
             return
 
         if isinstance(event, ModelDownloadFailed):
-            self._enter_disabled(f"model download failed: {event.error}")
+            logger.error("model download failed: %s", event.error)
+            self._enter_disabled(
+                "Couldn't download the whisper model. Check your "
+                "internet connection and restart whisperlite."
+            )
             return
 
         if self._state == State.ERROR:
@@ -584,8 +638,45 @@ class WhisperliteApp(rumps.App):
         self._recording_started_at = None
         self._set_state(State.ERROR, icon=self._config.ui.error_icon)
 
-    def _enter_disabled(self, message: str) -> None:
+    def _enter_disabled(
+        self, message: str, settings_url: str | None = None
+    ) -> None:
         self._last_error = message
-        self._last_error_item.title = f"Disabled: {message}"
+        self._last_error_item.title = message
+        if settings_url is not None:
+            self._disabled_settings_url = settings_url
+            self._fix_in_settings_item.title = "Fix in System Settings"
+            self._fix_in_settings_item.set_callback(self._on_open_disabled_settings)
+        else:
+            self._disabled_settings_url = None
+            self._fix_in_settings_item.title = ""
+            self._fix_in_settings_item.set_callback(None)
         logger.error("entering DISABLED state: %s", message)
         self._set_state(State.DISABLED, title=_DISABLED_TITLE)
+
+    def _on_open_disabled_settings(self, _: rumps.MenuItem) -> None:
+        url = self._disabled_settings_url
+        if not url:
+            return
+        try:
+            subprocess.run(["open", url], check=False)
+        except Exception as exc:
+            logger.warning("failed to open system settings deeplink: %s", exc)
+
+    def _format_hotkey(self) -> str:
+        """Render the configured record hotkey as a human-friendly string."""
+        raw = self._config.hotkey.record.strip("<>").lower()
+        pretty = _HOTKEY_DISPLAY_NAMES.get(raw, raw.capitalize())
+        return f"double-tap {pretty}"
+
+    def _announce_ready(self) -> None:
+        """Print the welcome line once the model is loaded and hotkey is live."""
+        if self._announced_ready:
+            return
+        self._announced_ready = True
+        sys.stderr.write(
+            f"\nwhisperlite — ready.\n"
+            f"{self._format_hotkey()} anywhere to dictate.\n"
+            f"press Escape anytime to cancel.\n"
+        )
+        sys.stderr.flush()

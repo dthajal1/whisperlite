@@ -1,13 +1,30 @@
 from __future__ import annotations
 
-import logging
-import signal
-import sys
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from types import FrameType
+import os
 
-import rumps
+# Silence the `resource_tracker: There appear to be N leaked semaphore objects`
+# noise printed at interpreter shutdown. The warning is emitted by the
+# multiprocessing.resource_tracker helper *subprocess*, which inherits warning
+# filters from PYTHONWARNINGS — so the env var must be set before any stdlib
+# multiprocessing import runs. MLX and PortAudio spawn helpers whose semaphores
+# outlive our own teardown; the warning is cosmetic and only surfaces on Ctrl+C,
+# where it makes the exit look like a crash.
+os.environ.setdefault("PYTHONWARNINGS", "ignore::UserWarning")
+
+# Quiet huggingface_hub's telemetry pings, but leave the tqdm progress bars
+# enabled — `download_model` is only called on a real cache miss, and watching
+# bytes tick up is the only signal a first-run user has that anything is
+# happening during the ~150 MB fetch.
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
+import logging  # noqa: E402
+import signal  # noqa: E402
+import sys  # noqa: E402
+from logging.handlers import RotatingFileHandler  # noqa: E402
+from pathlib import Path  # noqa: E402
+from types import FrameType  # noqa: E402
+
+import rumps  # noqa: E402
 
 from whisperlite.app import WhisperliteApp
 from whisperlite.config import load_config
@@ -38,6 +55,10 @@ def _install_signal_handlers(app: WhisperliteApp) -> None:
 
     def handler(signum: int, _frame: FrameType | None) -> None:
         logger.info("received signal %s, shutting down", signum)
+        # Newline first so any in-progress tqdm bar / `^C` echo doesn't
+        # collide with our message on the same line.
+        sys.stderr.write("\nwhisperlite: shhh… see you next time\n")
+        sys.stderr.flush()
         try:
             app.shutdown()
         finally:
@@ -80,7 +101,10 @@ def main() -> int:
 
     _setup_logging(config.log.level, config.log.path)
     logger.info("whisperlite starting")
+    sys.stderr.write("\nwhisperlite — starting…\n")
+    sys.stderr.flush()
 
+    app: WhisperliteApp | None = None
     try:
         app = WhisperliteApp(config)
         app.start_worker()
@@ -89,7 +113,14 @@ def main() -> int:
         app.run()
         return 0
     except KeyboardInterrupt:
-        logger.info("interrupted during init, exiting")
+        logger.info("interrupted, exiting")
+        sys.stderr.write("\nwhisperlite: shhh… see you next time\n")
+        sys.stderr.flush()
+        if app is not None:
+            try:
+                app.shutdown()
+            except Exception:
+                logger.exception("shutdown after KeyboardInterrupt failed")
         return 0
     except WhisperliteError as exc:
         logger.exception("fatal error during startup")

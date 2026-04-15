@@ -61,6 +61,8 @@ If you don't want to grant your primary terminal: open a different terminal app 
 
 > **Input Monitoring vs Accessibility:** Input Monitoring = read keystrokes (hotkey detection). Accessibility = synthesize keystrokes (paste). whisperlite needs both — missing either causes a silent half-failure.
 
+> **Tip:** If whisperlite is already running and shows a "Needs microphone access" or "Needs accessibility access" message in its menu, click **Fix in System Settings** in the same menu to jump straight to the right Privacy pane.
+
 ---
 
 ### Q: I upgraded Homebrew Python and permissions stopped working
@@ -137,7 +139,7 @@ double_tap_window_ms = 400    # range: [150, 1000]
 
 **Fix:**
 
-1. Verify permissions (see Permissions & TCC). Run `python tests/smoke/smoke_hotkey.py` and double-tap — it should print `Got double-tap!` within 30 seconds.
+1. Verify permissions (see Permissions & TCC). If whisperlite is already running and shows "Needs accessibility access" in its menu, click **Fix in System Settings** to jump straight to the right pane. Otherwise run `python tests/smoke/smoke_hotkey.py` and double-tap — it should print `Got double-tap!` within 30 seconds.
 2. Check any key-remap utility for rules on your chosen modifier. Try `<shift>` (least likely to be remapped) or temporarily disable the utility.
 3. Tail `~/Library/Logs/whisperlite.log` for `hotkey manager started` at launch.
 
@@ -306,7 +308,7 @@ name = "mlx-community/whisper-tiny-mlx"   # ~75 MB, much faster
 
 **Cause:** The menubar conveys state at a glance; detail lives in the log.
 
-**Fix:**
+**Fix:** Click **Open Log File** in the whisperlite menu — it opens the active log in your default viewer. For live streaming during a repro, tail it directly:
 
 ```bash
 tail -f ~/Library/Logs/whisperlite.log

@@ -289,7 +289,7 @@ def test_post_launch_init_mic_probe_failure_disables_app(app, mocks, mocker):
     app.post_launch_init()
 
     assert app._state == State.DISABLED
-    assert "Microphone" in (app._last_error or "")
+    assert "microphone" in (app._last_error or "").lower()
 
 
 def test_post_launch_init_hotkey_permission_failure_disables_app(
@@ -320,14 +320,18 @@ def test_model_ready_event_transitions_downloading_to_idle(app, mocks):
     assert app._state == State.IDLE
 
 
-def test_model_download_failed_event_disables_app(app, mocks):
+def test_model_download_failed_event_disables_app(app, mocks, caplog):
     from whisperlite.app import ModelDownloadFailed, State
 
     app._set_state(State.DOWNLOADING, title="D")
-    app._handle_event(ModelDownloadFailed(error="404"))
+    with caplog.at_level("ERROR"):
+        app._handle_event(ModelDownloadFailed(error="404"))
 
     assert app._state == State.DISABLED
-    assert "404" in (app._last_error or "")
+    # User-facing message is friendly, not the raw error.
+    assert "internet" in (app._last_error or "").lower()
+    # Raw cause is preserved in the log for debugging.
+    assert any("404" in rec.message for rec in caplog.records)
 
 
 def test_play_start_sound_called_on_enter_recording(mocks, fake_config):
