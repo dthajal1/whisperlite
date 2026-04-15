@@ -124,11 +124,11 @@ P1 = do next, P2 = soon, P3 = nice-to-have, P4 = someday/maybe.
 
 ## [P4] Bundle custom whisperlite-branded sound cues
 
-**What:** Ship a pair of custom-designed short audio cues (e.g. `whisperlite_start.aiff`, `whisperlite_stop.aiff`) inside the package at `whisperlite/assets/sounds/` instead of defaulting to macOS system sounds like Tink and Pop.
+**What:** Ship a pair of custom-designed short audio cues (e.g. `whisperlite_start.aiff`, `whisperlite_stop.aiff`) inside the package at `whisperlite/assets/sounds/` instead of defaulting to macOS system sounds like Bottle and Glass.
 
-**Why:** Current defaults (`/System/Library/Sounds/Tink.aiff` and `Pop.aiff`) are fine but generic — many macOS apps and the system itself use them for notifications, which could cause confusion ("was that whisperlite or an iMessage?"). A pair of distinctive, on-brand cues would make whisperlite instantly recognizable by ear.
+**Why:** Current defaults (`/System/Library/Sounds/Bottle.aiff` and `Glass.aiff`) are fine but generic — many macOS apps and the system itself use them for notifications, which could cause confusion ("was that whisperlite or an iMessage?"). A pair of distinctive, on-brand cues would make whisperlite instantly recognizable by ear.
 
-**Context:** The sound cue feature is already wired in via `whisperlite/sounds.py` and config fields `[sound] start_path` and `[sound] stop_path`. Defaults point to `/System/Library/Sounds/Tink.aiff` and `Pop.aiff`. To ship custom sounds, add a `whisperlite/assets/sounds/` directory with two short (<200ms) audio files, update the defaults in `whisperlite/config.py` to point to the bundled files via `Path(__file__).parent / "assets" / "sounds" / "..."`, and add the new assets to the `[tool.setuptools.package-data]` glob in `pyproject.toml`.
+**Context:** The sound cue feature is already wired in via `whisperlite/sounds.py` and config fields `[sound] start_path` and `[sound] stop_path`. Defaults point to `/System/Library/Sounds/Bottle.aiff` and `Glass.aiff`. To ship custom sounds, add a `whisperlite/assets/sounds/` directory with two short (<200ms) audio files, update the defaults in `whisperlite/config.py` to point to the bundled files via `Path(__file__).parent / "assets" / "sounds" / "..."`, and add the new assets to the `[tool.setuptools.package-data]` glob in `pyproject.toml`.
 
 **Acceptance criteria:**
 - [ ] Two audio files at `whisperlite/assets/sounds/` (names and format your call)

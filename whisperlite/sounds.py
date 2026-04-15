@@ -7,8 +7,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # macOS built-in system sounds
-DEFAULT_START_SOUND = Path("/System/Library/Sounds/Tink.aiff")
-DEFAULT_STOP_SOUND = Path("/System/Library/Sounds/Pop.aiff")
+DEFAULT_START_SOUND = Path("/System/Library/Sounds/Bottle.aiff")
+DEFAULT_STOP_SOUND = Path("/System/Library/Sounds/Glass.aiff")
 
 
 def play(sound_path: Path) -> None:

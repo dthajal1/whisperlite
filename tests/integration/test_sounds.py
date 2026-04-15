@@ -44,8 +44,8 @@ def test_play_swallows_oserror(mocker) -> None:
 
 
 def test_default_start_sound_path_points_to_system_file() -> None:
-    assert DEFAULT_START_SOUND == Path("/System/Library/Sounds/Tink.aiff")
+    assert DEFAULT_START_SOUND == Path("/System/Library/Sounds/Bottle.aiff")
 
 
 def test_default_stop_sound_path_points_to_system_file() -> None:
-    assert DEFAULT_STOP_SOUND == Path("/System/Library/Sounds/Pop.aiff")
+    assert DEFAULT_STOP_SOUND == Path("/System/Library/Sounds/Glass.aiff")

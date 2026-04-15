@@ -28,8 +28,8 @@ _DEFAULT_IDLE_ICON = _BUNDLED_ASSETS_DIR / "idle.png"
 _DEFAULT_RECORDING_ICON = _BUNDLED_ASSETS_DIR / "recording.png"
 _DEFAULT_ERROR_ICON = _BUNDLED_ASSETS_DIR / "error.png"
 
-_DEFAULT_START_SOUND = Path("/System/Library/Sounds/Tink.aiff")
-_DEFAULT_STOP_SOUND = Path("/System/Library/Sounds/Pop.aiff")
+_DEFAULT_START_SOUND = Path("/System/Library/Sounds/Bottle.aiff")
+_DEFAULT_STOP_SOUND = Path("/System/Library/Sounds/Glass.aiff")
 
 
 @dataclass(frozen=True)

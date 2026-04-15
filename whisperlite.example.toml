@@ -55,5 +55,5 @@ path = "~/Library/Logs/whisperlite.log"
 # macOS alerts — good picks include Tink, Pop, Funk, Glass, Hero, Morse,
 # Ping, Purr, Sosumi, Submarine, Bottle, Frog, Blow, Basso.
 enabled = true
-start_path = "/System/Library/Sounds/Tink.aiff"
-stop_path = "/System/Library/Sounds/Pop.aiff"
+start_path = "/System/Library/Sounds/Bottle.aiff"
+stop_path = "/System/Library/Sounds/Glass.aiff"

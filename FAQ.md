@@ -230,9 +230,9 @@ Restart whisperlite. The menu item opens whichever file was actually loaded.
 
 ### Q: Can I disable the sound cues?
 
-**Symptom:** The Tink/Pop start/stop sounds are unwanted (e.g. during meetings).
+**Symptom:** The start/stop sound cues are unwanted (e.g. during meetings).
 
-**Cause:** Sound cues are enabled by default (`Tink.aiff` on start, `Pop.aiff` on stop).
+**Cause:** Sound cues are enabled by default (`Bottle.aiff` on start, `Glass.aiff` on stop).
 
 **Fix:** Edit `whisperlite.toml`:
 
@@ -247,7 +247,7 @@ Restart whisperlite.
 
 ### Q: Can I use different sounds?
 
-**Symptom:** You want something other than Tink and Pop.
+**Symptom:** You want something other than Bottle and Glass.
 
 **Cause:** Defaults point at macOS built-ins. whisperlite plays any file `afplay` supports (`.aiff`, `.wav`, `.mp3`).
 
