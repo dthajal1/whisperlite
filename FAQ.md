@@ -277,7 +277,7 @@ Custom files work too — use an absolute path.
 
 **Symptom:** First run appears to hang for minutes, or shows slow Hugging Face download progress.
 
-**Cause:** mlx-whisper downloads the model (default `mlx-community/whisper-medium-mlx`, ~1.5 GB) on first use.
+**Cause:** mlx-whisper downloads the model (default `mlx-community/whisper-small-mlx`, ~480 MB) on first use.
 
 **Fix:** Wait it out. Subsequent runs start in ~2 seconds from cache. For faster setup testing, use a smaller model — see the next Q.
 
@@ -287,7 +287,7 @@ Custom files work too — use an absolute path.
 
 **Symptom:** You want a different quality / speed / size trade-off.
 
-**Cause:** The default `medium` is tuned for quality. Smaller models are faster and much smaller to download.
+**Cause:** The default `small` balances quality and speed. Tiny/base are faster; medium/large are more accurate.
 
 **Fix:** Edit `whisperlite.toml`:
 
@@ -296,7 +296,7 @@ Custom files work too — use an absolute path.
 name = "mlx-community/whisper-tiny-mlx"   # ~75 MB, much faster
 ```
 
-`tiny` quality drops significantly — use it for setup testing, then switch back to `medium` or `large-v3`. See `whisperlite.example.toml` for the full list of supported models.
+`tiny` quality drops significantly — use it for setup testing, then switch back to `small` or up to `medium`/`large-v3`. See `whisperlite.example.toml` for the full list of supported models.
 
 ---
 

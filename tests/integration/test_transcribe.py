@@ -8,7 +8,7 @@ import pytest
 from whisperlite import transcribe as transcribe_mod
 from whisperlite.errors import ModelDownloadError, ModelLoadError, TranscribeError
 
-MODEL = "mlx-community/whisper-medium-mlx"
+MODEL = "mlx-community/whisper-small-mlx"
 LANG = "en"
 
 

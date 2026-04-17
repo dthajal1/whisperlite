@@ -2,7 +2,7 @@
 
 [model]
 # Hugging Face repo id of the mlx-whisper model to use.
-name = "mlx-community/whisper-medium-mlx"
+name = "mlx-community/whisper-small-mlx"
 # Language code (e.g. "en") or "auto" for detection.
 language = "en"
 

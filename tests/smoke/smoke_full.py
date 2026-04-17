@@ -3,7 +3,7 @@
 This script is NOT run by pytest. It exercises the full whisperlite loop
 against real macOS APIs: mic capture, mlx-whisper transcription, and text
 injection into Notes. First run will download the configured Whisper
-model (~1.5 GB for medium) and trigger the Microphone, Input Monitoring,
+model (~480 MB for small) and trigger the Microphone, Input Monitoring,
 and Accessibility TCC prompts. Grant them and re-run.
 
 Before running, open Notes and click inside a note's body so the cursor

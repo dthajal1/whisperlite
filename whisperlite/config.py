@@ -36,7 +36,7 @@ _DEFAULT_STOP_SOUND = Path("/System/Library/Sounds/Glass.aiff")
 class ModelConfig:
     """Whisper model selection and language."""
 
-    name: str = "mlx-community/whisper-medium-mlx"
+    name: str = "mlx-community/whisper-small-mlx"
     language: str = "en"
 
 
@@ -138,7 +138,7 @@ _MINIMAL_STUB = """\
 # whisperlite config — auto-generated stub.
 
 [model]
-name = "mlx-community/whisper-medium-mlx"
+name = "mlx-community/whisper-small-mlx"
 language = "en"
 """
 

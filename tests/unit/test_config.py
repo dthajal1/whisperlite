@@ -39,13 +39,13 @@ def test_default_config_when_file_missing(tmp_path: Path) -> None:
     missing = tmp_path / "nope.toml"
     config = load_config(missing)
     assert isinstance(config, Config)
-    assert config.model.name == "mlx-community/whisper-medium-mlx"
+    assert config.model.name == "mlx-community/whisper-small-mlx"
 
 
 def test_default_config_values(tmp_path: Path) -> None:
     config = load_config(tmp_path / "nope.toml")
     assert config.model == ModelConfig(
-        name="mlx-community/whisper-medium-mlx", language="en"
+        name="mlx-community/whisper-small-mlx", language="en"
     )
     assert config.hotkey == HotkeyConfig(record="<alt>", double_tap_window_ms=400)
     assert config.audio == AudioConfig(
@@ -68,7 +68,7 @@ def test_load_config_with_user_overlay(tmp_path: Path) -> None:
     config = load_config(path)
     assert config.audio.max_recording_seconds == 30
     assert config.audio.sample_rate == 16000
-    assert config.model.name == "mlx-community/whisper-medium-mlx"
+    assert config.model.name == "mlx-community/whisper-small-mlx"
 
 
 def test_load_config_partial_table(tmp_path: Path) -> None:
@@ -158,7 +158,7 @@ def test_unknown_top_level_key_logs_warning(
     with caplog.at_level(logging.WARNING, logger="whisperlite.config"):
         config = load_config(path)
     assert any("unknown_table" in rec.message for rec in caplog.records)
-    assert config.model.name == "mlx-community/whisper-medium-mlx"
+    assert config.model.name == "mlx-community/whisper-small-mlx"
 
 
 def test_path_field_expands_tilde(tmp_path: Path) -> None:

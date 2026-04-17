@@ -14,7 +14,7 @@ os.environ.setdefault("PYTHONWARNINGS", "ignore::UserWarning")
 # Quiet huggingface_hub's telemetry pings, but leave the tqdm progress bars
 # enabled — `download_model` is only called on a real cache miss, and watching
 # bytes tick up is the only signal a first-run user has that anything is
-# happening during the ~150 MB fetch.
+# happening during the ~480 MB fetch.
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 import logging  # noqa: E402

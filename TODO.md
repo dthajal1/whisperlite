@@ -8,7 +8,7 @@ P1 = do next, P2 = soon, P3 = nice-to-have, P4 = someday/maybe.
 
 **What:** A reproducible benchmark script that measures warmup time, single-utterance latency, and transcription accuracy for each Whisper model supported by mlx-whisper, on the user's actual Mac hardware.
 
-**Why:** Users considering whisperlite want to know which model to pick before committing to a 1.5GB download. The design doc defaults to `mlx-community/whisper-medium-mlx` but provides no quantitative basis for that choice on different hardware.
+**Why:** Users considering whisperlite want to know which model to pick before committing to a download (the default is ~480 MB, but the large model is ~3 GB). The current default is `mlx-community/whisper-small-mlx` but we provide no quantitative basis for that choice on different hardware.
 
 **Context:** `whisperlite/transcribe.py` wraps `mlx_whisper.transcribe`. Build step 0 measured `whisper-medium-mlx` at ~1595ms first call, ~28ms warm reuse on the user's M-series Mac. We have a fixture audio file at `tests/fixtures/hello_world.wav` (~1.72s, "hello world from whisperlite"). Candidate models to benchmark: `whisper-tiny-mlx`, `whisper-base-mlx`, `whisper-small-mlx`, `whisper-medium-mlx`, `whisper-large-v3-mlx`, and `distil-whisper-medium-mlx` if available. Report: per-model warmup time, warm-call latency (avg + p95 over 10 runs), model size on disk, and transcription text (manual inspection for quality).
 
@@ -30,7 +30,7 @@ P1 = do next, P2 = soon, P3 = nice-to-have, P4 = someday/maybe.
 
 **Why:** When a user wants to change the model in their `whisperlite.toml`, they currently have to guess or google. A built-in registry removes that friction and lets users make informed trade-offs between speed, quality, size, and multilingual support.
 
-**Context:** Whisper models available via mlx-whisper include tiny (~75MB), base (~150MB), small (~460MB), medium (~1.5GB), large-v3 (~3GB), plus distilled variants. Each has different accuracy on English vs multilingual, different latency characteristics, and different memory footprints. The registry should be source-of-truth for which models are officially supported and what metadata to surface.
+**Context:** Whisper models available via mlx-whisper include tiny (~75MB), base (~145MB), small (~480MB), medium (~1.5GB), large-v3 (~3GB), plus distilled variants. Each has different accuracy on English vs multilingual, different latency characteristics, and different memory footprints. The registry should be source-of-truth for which models are officially supported and what metadata to surface.
 
 **Acceptance criteria:**
 - [ ] A file `whisperlite/models.py` (or a TOML at `whisperlite/models.toml`) with the registry data.

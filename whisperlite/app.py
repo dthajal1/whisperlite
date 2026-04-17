@@ -215,7 +215,7 @@ class WhisperliteApp(rumps.App):
         else:
             sys.stderr.write(
                 "\nwhisperlite — first run, fetching the whisper model "
-                "(~1.5 GB, one-time)…\n"
+                "(~480 MB, one-time)…\n"
             )
             sys.stderr.flush()
             self._set_state(State.DOWNLOADING, title=_DOWNLOADING_TITLE)

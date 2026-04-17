@@ -2,7 +2,7 @@
 
 This script is NOT run by pytest. It exercises the real mlx-whisper path
 end-to-end against a small fixture WAV file and will download the configured
-Whisper model on first run (~1.5 GB for medium).
+Whisper model on first run (~480 MB for small).
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import numpy as np
 
 from whisperlite.transcribe import transcribe, warmup
 
-MODEL = "mlx-community/whisper-medium-mlx"
+MODEL = "mlx-community/whisper-small-mlx"
 LANGUAGE = "en"
 
 FIXTURE_PATH = (
