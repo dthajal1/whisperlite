@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 _BLOCKSIZE = 1024
 _WATCHDOG_INTERVAL = 0.5
 _WATCHDOG_TIMEOUT = 2.0
+# stream.stop()/close() occasionally wedges inside PortAudio/CoreAudio on
+# macOS — a C call that never returns. Run it in a daemon thread and give
+# up after this many seconds so the worker can still transcribe + paste.
+_STREAM_CLOSE_TIMEOUT = 2.0
 
 
 def list_input_devices() -> list[dict]:
@@ -180,19 +184,78 @@ class AudioRecorder:
                 return
 
     def _shutdown_stream(self) -> None:
+        logger.info(
+            "shutdown_stream: entry (stream=%s, active=%s, max_duration_reached=%s)",
+            "present" if self._stream is not None else "None",
+            self._stream.active if self._stream is not None else "n/a",
+            self._max_duration_reached,
+        )
+        t0 = time.monotonic()
         self._watchdog_stop.set()
         if self._watchdog is not None:
             self._watchdog.join(timeout=1.0)
             self._watchdog = None
+        logger.info(
+            "shutdown_stream: watchdog joined in %.0fms",
+            (time.monotonic() - t0) * 1000,
+        )
 
         if self._stream is None:
+            logger.info("shutdown_stream: stream already None, returning")
             return
-        try:
-            self._stream.stop()
-            self._stream.close()
-        except Exception as exc:
-            logger.warning("error while closing audio stream: %s", exc)
-            if self._stream_error is None:
-                self._stream_error = f"stream close failed: {exc}"
-        finally:
-            self._stream = None
+
+        stream = self._stream
+        self._stream = None
+
+        close_done = threading.Event()
+        close_error: list[BaseException | None] = [None]
+
+        def _do_close() -> None:
+            # Use abort() (Pa_AbortStream) rather than stop() (Pa_StopStream).
+            # stop() waits for the audio driver's buffer queue to drain before
+            # tearing down the stream, and that drain has been observed to hang
+            # indefinitely inside CoreAudio on macOS. Our own _callback has
+            # already appended every frame to self._buffer, so we don't need
+            # drain semantics — abort()'s hard teardown is fine and more
+            # reliable. The timeout below still wraps this as a safety net.
+            try:
+                t1 = time.monotonic()
+                stream.abort()
+                logger.info(
+                    "shutdown_stream: stream.abort() returned in %.0fms",
+                    (time.monotonic() - t1) * 1000,
+                )
+                t2 = time.monotonic()
+                stream.close()
+                logger.info(
+                    "shutdown_stream: stream.close() returned in %.0fms",
+                    (time.monotonic() - t2) * 1000,
+                )
+            except BaseException as exc:
+                close_error[0] = exc
+            finally:
+                close_done.set()
+
+        close_thread = threading.Thread(
+            target=_do_close, name="whisperlite-audio-close", daemon=True
+        )
+        close_thread.start()
+
+        if close_done.wait(_STREAM_CLOSE_TIMEOUT):
+            if close_error[0] is not None:
+                logger.warning(
+                    "error while closing audio stream: %s", close_error[0]
+                )
+                if self._stream_error is None:
+                    self._stream_error = f"stream close failed: {close_error[0]}"
+        else:
+            # PortAudio/CoreAudio hung inside stop()/close() on macOS. The
+            # audio we've already buffered is safe — transcribe + paste can
+            # still proceed. The mic indicator may stay lit at the OS level
+            # until whisperlite is restarted.
+            logger.error(
+                "shutdown_stream: stream.stop()/close() did not return within %.1fs; "
+                "abandoning close thread (mic indicator may stay on until restart)",
+                _STREAM_CLOSE_TIMEOUT,
+            )
+        logger.info("shutdown_stream: done")

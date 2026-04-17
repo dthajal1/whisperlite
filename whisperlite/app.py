@@ -409,6 +409,10 @@ class WhisperliteApp(rumps.App):
     def _on_hotkey_pressed(self) -> None:
         self._queue.put(HotkeyPressed())
 
+    def _on_max_duration_timer(self) -> None:
+        logger.info("max-duration timer fired, enqueuing MaxDurationReached")
+        self._queue.put(MaxDurationReached())
+
     def _on_cancel_pressed(self) -> None:
         # Set the flag synchronously so the worker thread's checkpoints in
         # _finish_recording_and_transcribe (which runs long — transcribe +
@@ -424,6 +428,11 @@ class WhisperliteApp(rumps.App):
                 event = self._queue.get(timeout=_QUEUE_POLL_S)
             except queue.Empty:
                 continue
+            logger.info(
+                "worker dequeued %s in state %s",
+                type(event).__name__,
+                self._state.value,
+            )
             if isinstance(event, ShutdownRequested):
                 return
             try:
@@ -502,7 +511,7 @@ class WhisperliteApp(rumps.App):
 
         self._max_duration_timer = threading.Timer(
             self._config.audio.max_recording_seconds,
-            lambda: self._queue.put(MaxDurationReached()),
+            self._on_max_duration_timer,
         )
         self._max_duration_timer.daemon = True
         self._max_duration_timer.start()
@@ -535,6 +544,7 @@ class WhisperliteApp(rumps.App):
         text = transcribe(
             audio, self._config.model.name, self._config.model.language
         )
+        logger.info("transcribed %d chars: %r", len(text), text)
 
         # Checkpoint 3: cancel after transcribe but before inject.
         if self._cancel_requested:
